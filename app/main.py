@@ -169,37 +169,6 @@ def doctor_dashboard(
         "patients": patients_data
     }
 
-# @app.get("/health/live")
-# def liveness_check():
-#     return {
-#         "status": "alive",
-#         "service": "multiple-disease-prediction"
-#     }
-       
-# @app.get("/health/ready")
-# def readiness_check():
-#     try:
-#         if not MODEL_REGISTRY:
-#             return {
-#                 "status": "unhealthy",
-#                 "reason": "No models registered",
-#                 "ready": False
-#             }
-
-#         return {
-#             "status": "ready",
-#             "models_loaded": list(MODEL_REGISTRY.keys()),
-#             "model_count": len(MODEL_REGISTRY),
-#             "ready": True
-#         }
-
-#     except Exception as e:
-#         return {
-#             "status": "unhealthy",
-#             "error": str(e),
-#             "ready": False
-#         }
-
 # @app.get("/export/text")
 # def export_text(user: str = Depends(get_current_user)):
 #     db = SessionLocal()
