@@ -1,0 +1,2 @@
+Age Pregnancy Glucose BloodPressure SkinThickness Insulin BMI
+26 3 78 50 32 88 31

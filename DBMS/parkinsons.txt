@@ -1,0 +1,67 @@
+{
+  "disease": "parkinsons",
+  "data": {
+    "MDVP:Fo(Hz)": 210.0,
+    "MDVP:Fhi(Hz)": 260.0,
+    "MDVP:Flo(Hz)": 150.0,
+    "MDVP:Jitter(%)": 0.015,
+    "MDVP:Jitter(Abs)": 0.00012,
+    "MDVP:RAP": 0.008,
+    "MDVP:PPQ": 0.010,
+    "Jitter:DDP": 0.025,
+    "MDVP:Shimmer": 0.060,
+    "MDVP:Shimmer(dB)": 0.55,
+    "Shimmer:APQ3": 0.035,
+    "Shimmer:APQ5": 0.040,
+    "MDVP:APQ": 0.050,
+    "Shimmer:DDA": 0.105,
+    "NHR": 0.030,
+    "HNR": 15.0,
+    "RPDE": 0.65,
+    "DFA": 0.85,
+    "spread1": -4.0,
+    "spread2": 0.3,
+    "D2": 2.8,
+    "PPE": 0.35
+  }
+}
+
+
+{
+  "risk": "High Risk",
+  "confidence": 0.80
+}
+
+
+{
+  "disease": "parkinsons",
+  "data": {
+    "MDVP:Fo(Hz)": 120.0,
+    "MDVP:Fhi(Hz)": 150.0,
+    "MDVP:Flo(Hz)": 100.0,
+    "MDVP:Jitter(%)": 0.003,
+    "MDVP:Jitter(Abs)": 0.00002,
+    "MDVP:RAP": 0.002,
+    "MDVP:PPQ": 0.003,
+    "Jitter:DDP": 0.006,
+    "MDVP:Shimmer": 0.020,
+    "MDVP:Shimmer(dB)": 0.15,
+    "Shimmer:APQ3": 0.010,
+    "Shimmer:APQ5": 0.012,
+    "MDVP:APQ": 0.015,
+    "Shimmer:DDA": 0.030,
+    "NHR": 0.010,
+    "HNR": 28.0,
+    "RPDE": 0.35,
+    "DFA": 0.70,
+    "spread1": -7.5,
+    "spread2": 0.1,
+    "D2": 1.5,
+    "PPE": 0.08
+  }
+}
+
+{
+  "risk": "Low Risk",
+  "confidence": 0.93
+}

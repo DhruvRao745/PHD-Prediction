@@ -1,0 +1,38 @@
+{
+  "disease": "diabetes",
+  "data": {
+    "Pregnancies": 6,
+    "Glucose": 185,
+    "BloodPressure": 95,
+    "SkinThickness": 40,
+    "Insulin": 220,
+    "BMI": 38.5,
+    "DiabetesPedigreeFunction": 0.9,
+    "Age": 55
+  }
+}
+
+{
+  "risk": "High Risk",
+  "confidence": 0.88
+}
+
+
+{
+  "disease": "diabetes",
+  "data": {
+    "Pregnancies": 1,
+    "Glucose": 90,
+    "BloodPressure": 70,
+    "SkinThickness": 20,
+    "Insulin": 85,
+    "BMI": 22.5,
+    "DiabetesPedigreeFunction": 0.2,
+    "Age": 25
+  }
+}
+
+{
+  "risk": "Low Risk",
+  "confidence": 0.92
+}
