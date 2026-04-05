@@ -3,3 +3,4 @@ uvicorn
 scikit-learn
 pandas
 joblib
+docker = docker exec -it health-postgres psql -U health_user -d health_db

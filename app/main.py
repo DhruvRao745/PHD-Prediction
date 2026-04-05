@@ -1,36 +1,26 @@
-from fastapi import FastAPI
-from fastapi import HTTPException
+from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 import sys
 from pathlib import Path
+
+from streamlit import user
 from app.registry.model_registry import MODEL_REGISTRY
 from app.auth.routes import router as auth_router
-from fastapi import Depends
 from app.auth.security import get_current_user
 from app.database import SessionLocal
-from app.models.prediction import Prediction 
 from fastapi.responses import FileResponse
 from reportlab.lib.pagesizes import letter
 from reportlab.pdfgen import canvas
-import os
-from fastapi.responses import FileResponse
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
-from reportlab.lib.utils import ImageReader
-import matplotlib.pyplot as plt
-import io
 from datetime import datetime
 from app.deps import get_db
-from fastapi import Depends
 from app.services.prediction_service import save_prediction
 from sqlalchemy.orm import Session
 from app.models.patient_profile import PatientProfile
 from app.models.doctor_profile import DoctorProfile
 from app.models.doctor_patient import DoctorPatient
 from app.models.prediction import Prediction
-# testing PR workflow
-# TODO: fix import issue 
-# Ensure project root is on sys.path when running this file directly
+
+# Ensure project root is on sys.path
 project_root = str(Path(__file__).resolve().parent.parent)
 if project_root not in sys.path:
     sys.path.insert(0, project_root)
@@ -39,7 +29,7 @@ try:
     from app.core.predictor import predict
 except ModuleNotFoundError:
     from core.predictor import predict
-# print("Successfully imported predictor module")
+
 app = FastAPI()
 app.include_router(auth_router)
 
@@ -48,37 +38,25 @@ class PredictRequest(BaseModel):
     disease: str
     data: dict
 
+@app.get("/")
+def root():
+    return {"message": "Welcome to the Multiple Disease Prediction API."}
 
-# @app.get("/")
-# def root():
-#     return {"message": "Welcome to the Multiple Disease Prediction API. Use /predict endpoint to get predictions."}
-
-# @app.get("/health")
-# def health_check():
-#     return {
-#         "status": "ok",
-#         "service": "multiple-disease-prediction",
-#         "message": "Service is running"
-#     }
-
-
+# ------------------ PREDICT ------------------
 @app.post("/predict")
 def predict_api(
     request: PredictRequest,
-    user: dict = Depends(get_current_user),    # returns full user object
+    user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # 🧠 Run ML model
     result = predict(request.disease, request.data)
 
-    # Extract from nested structure
     risk = result["prediction"]["risk"]
     confidence = result["prediction"]["confidence"]
 
-    # 🧠 Save to PostgreSQL
     save_prediction(
         db=db,
-        patient_id=user["id"],   # from JWT payload
+        patient_id=user["id"],
         disease=request.disease,
         risk_level=risk,
         probability=confidence,
@@ -88,42 +66,42 @@ def predict_api(
 
     return result
 
+
+# ------------------ HISTORY ------------------
 @app.get("/history")
 def get_history(
     disease: str | None = None,
     user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-
     query = db.query(Prediction).filter(
         Prediction.patient_id == user["id"]
     )
 
     if disease:
-        query = query.filter(
-            Prediction.disease == disease
-        )
+        query = query.filter(Prediction.disease == disease)
 
-    records = query.all()
+    return query.all()
 
-    return records
 
+# ------------------ PATIENT DASHBOARD ------------------
 @app.get("/dashboard/patient")
 def patient_dashboard(
     user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # 🔎 Get patient profile
+    if user["role"] != "patient":
+        raise HTTPException(403, "Access denied")
+
     patient = db.query(PatientProfile).filter(
         PatientProfile.patient_id == user["id"]
     ).first()
 
     if not patient:
-        return {"error": "Patient profile not found"}
+        raise HTTPException(404, "Patient profile not found")
 
-    # 🔎 Get predictions
     predictions = db.query(Prediction).filter(
-        Prediction.patient_id == patient.id
+        Prediction.patient_id == patient.patient_id
     ).all()
 
     return {
@@ -131,38 +109,52 @@ def patient_dashboard(
         "predictions": predictions
     }
 
+
+# ------------------ DOCTOR DASHBOARD ------------------
 @app.get("/dashboard/doctor")
 def doctor_dashboard(
     user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    # 🔎 Doctor profile
+    if user["role"] != "doctor":
+        raise HTTPException(403, "Access denied")
+
     doctor = db.query(DoctorProfile).filter(
         DoctorProfile.doctor_id == user["id"]
     ).first()
 
     if not doctor:
-        return {"error": "Doctor profile not found"}
+        raise HTTPException(404, "Doctor profile not found")
 
-    # 🔎 Patients assigned to doctor
     relations = db.query(DoctorPatient).filter(
-        DoctorPatient.doctor_id == doctor.id
+        DoctorPatient.doctor_id == doctor.doctor_id   # ✅ FIXED
     ).all()
 
     patients_data = []
 
     for rel in relations:
         patient = db.query(PatientProfile).filter(
-            PatientProfile.id == rel.patient_id
+            PatientProfile.patient_id == rel.patient_id
         ).first()
 
+        if not patient:
+            continue
+
         predictions = db.query(Prediction).filter(
-            Prediction.patient_id == patient.id
+            Prediction.patient_id == patient.patient_id   # ✅ FIXED
         ).all()
 
         patients_data.append({
-            "patient": patient,
-            "predictions": predictions
+            "patient_id": patient.patient_id,
+            "patient_name": patient.name,
+            "age": patient.age,
+            "predictions": [{
+                "disease": p.disease,
+                "risk": p.risk_level,
+                "confidence": p.probability
+            }
+                for p in predictions
+            ]
         })
 
     return {
@@ -170,108 +162,115 @@ def doctor_dashboard(
         "patients": patients_data
     }
 
-# @app.get("/export/text")
-# def export_text(user: str = Depends(get_current_user)):
-#     db = SessionLocal()
 
-#     records = db.query(Prediction).filter(
-#         Prediction.username == user
-#     ).all()
+# ------------------ ASSIGN PATIENT ------------------
+@app.post("/doctor/assign-patient")
+def assign_patient(
+    patient_id: int,
+    user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if user["role"] != "doctor":
+        raise HTTPException(403, "Only doctors allowed")
 
-#     file_path = f"{user}_health_report.txt"
+    doctor = db.query(DoctorProfile).filter(
+        DoctorProfile.doctor_id == user["id"]
+    ).first()
 
-#     with open(file_path, "w") as f:
-#         f.write(f"Health Report for {user}\n\n")
+    if not doctor:
+        raise HTTPException(404, "Doctor profile not found")
 
-#         for r in records:
-#             f.write(f"{r.timestamp} | {r.disease} | {r.result}\n")
+    patient = db.query(PatientProfile).filter(
+        PatientProfile.patient_id == patient_id
+    ).first()
 
-#     return FileResponse(file_path, filename=file_path)
+    if not patient:
+        raise HTTPException(404, "Patient not found")
 
-@app.get("/export/pdf")
-def export_pdf(user: str = Depends(get_current_user)):  
+    existing = db.query(DoctorPatient).filter(
+        DoctorPatient.doctor_id == doctor.doctor_id,
+        DoctorPatient.patient_id == patient_id
+    ).first()
 
-    db = SessionLocal()
+    if existing:
+        return {"message": "Patient already assigned"}
 
-    records = db.query(Prediction).filter(
-        Prediction.username == user
-    ).order_by(Prediction.id.asc()).all()
+    relation = DoctorPatient(
+        doctor_id=doctor.doctor_id,
+        patient_id=patient_id
+    )
 
-    if not records:
-        return {"message": "No records found"}
+    db.add(relation)
+    db.commit()
 
-    file_path = f"{user}_medical_report.pdf"
+    return {"message": "Patient assigned successfully"}
 
-    c = canvas.Canvas(file_path, pagesize=letter)
-    y = 750
+# --------- Patient Profile API ---------
+@app.post("/profile/patient")
+def create_patient_profile(
+    name: str,
+    age: int,
+    gender: str,
+    height_cm: float,
+    weight_kg: float,
+    user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    print("User from token:", user)  # 🔥 DEBUGGING LINE 
+    if user["role"] != "patient":
+        raise HTTPException(403, "Only patients allowed")
 
-    # 🧑‍⚕️ TITLE
-    c.setFont("Helvetica-Bold", 18)
-    c.drawString(120, y, "MULTIPLE DISEASE REPORT")
+    existing = db.query(PatientProfile).filter(
+        PatientProfile.patient_id == user["id"]
+    ).first()
 
-    y -= 40
+    if existing:
+        return {"message": "Profile already exists"}
 
-    # 🧑 PATIENT INFO
-    c.setFont("Helvetica", 12)
-    c.drawString(50, y, f"Patient Name: {user}")
-    y -= 20
+    profile = PatientProfile(
+        patient_id=user["id"],
+        name=name,
+        age=age,
+        gender=gender,
+        height_cm=height_cm,
+        weight_kg=weight_kg
+    )
 
-    c.drawString(50, y, f"Report Date: {datetime.now()}")
-    y -= 30
+    db.add(profile)
+    db.commit()
 
-    # 📋 SUMMARY TABLE HEADER
-    c.setFont("Helvetica-Bold", 12)
-    c.drawString(50, y, "Date")
-    c.drawString(200, y, "Disease")
-    c.drawString(350, y, "Risk")
+    return {"message": "Patient profile created"}
+   
 
-    y -= 20
-    c.setFont("Helvetica", 11)
+# --------- Doctor Profile API ---------
+@app.post("/profile/doctor")
+def create_doctor_profile(
+    name: str,
+    specialization: str,
+    hospital: str,
+    license_no: str,
+    user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if user["role"] != "doctor":
+        raise HTTPException(403, "Only doctors allowed")
 
-    # 🧠 GROUP BY DISEASE
-    disease_data = {}
+    existing = db.query(DoctorProfile).filter(
+        DoctorProfile.doctor_id == user["id"]
+    ).first()
 
-    for r in records:
+    if existing:
+        return {"message": "Profile already exists"}
 
-        # Extract readable risk
-        try:
-            risk = r.result.split("'risk': '")[1].split("'")[0]
-        except:
-            risk = "Unknown"
+    profile = DoctorProfile(
+        doctor_id=user["id"],
+        name=name,
+        specialization=specialization,
+        hospital=hospital,
+        license_no=license_no
+    )
 
-        c.drawString(50, y, r.timestamp.split(" ")[0])
-        c.drawString(200, y, r.disease)
-        c.drawString(350, y, risk)
+    db.add(profile)
+    db.commit()
 
-        disease_data.setdefault(r.disease, []).append((r.timestamp, risk))
-
-        y -= 18
-        if y < 100:
-            c.showPage()
-            y = 750
-
-    # 🧩 DISEASE-WISE SECTIONS
-    c.showPage()
-    y = 750
-
-    for disease, data in disease_data.items():
-
-        c.setFont("Helvetica-Bold", 14)
-        c.drawString(50, y, f"{disease.upper()} REPORT")
-
-        y -= 25
-        c.setFont("Helvetica", 11)
-
-        for date, risk in data:
-            c.drawString(60, y, f"{date} → {risk}")
-            y -= 18
-
-            if y < 80:
-                c.showPage()
-                y = 750
-
-        y -= 20
-
-    c.save()
-
-    return FileResponse(file_path, filename=file_path)
+    return {"message": "Doctor profile created"}

@@ -3,6 +3,8 @@ from jose import jwt, JWTError
 from datetime import datetime, timedelta, timezone
 from fastapi.security import OAuth2PasswordBearer
 from fastapi import Depends, HTTPException
+from app.database import SessionLocal
+from app.models.account import Account
 
 SECRET_KEY = "supersecretkey"   # ONLY ONE
 ALGORITHM = "HS256"
@@ -32,9 +34,18 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
         user_id = payload.get("sub")
 
         if user_id is None:
-            raise HTTPException(401, "Invalid token")
+            raise HTTPException(status_code=401, detail="Invalid token")
 
-        return {"id": int(user_id)}
+        db = SessionLocal()
+        user = db.query(Account).filter(Account.id == int(user_id)).first()
+
+        if not user:
+            raise HTTPException(status_code=401, detail="User not found")
+
+        return {
+            "id": user.id,
+            "role": user.role   # 🔥 THIS LINE IS MISSING IN YOUR CODE
+        }
 
     except JWTError:
-        raise HTTPException(401, "Invalid token")
+        raise HTTPException(status_code=401, detail="Invalid token")
