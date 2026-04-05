@@ -2,7 +2,6 @@ from fastapi import FastAPI, HTTPException, Depends
 from pydantic import BaseModel
 import sys
 from pathlib import Path
-
 from streamlit import user
 from app.registry.model_registry import MODEL_REGISTRY
 from app.auth.routes import router as auth_router
@@ -19,6 +18,8 @@ from app.models.patient_profile import PatientProfile
 from app.models.doctor_profile import DoctorProfile
 from app.models.doctor_patient import DoctorPatient
 from app.models.prediction import Prediction
+from datetime import datetime, timedelta
+from sqlalchemy import and_
 
 # Ensure project root is on sys.path
 project_root = str(Path(__file__).resolve().parent.parent)
@@ -49,11 +50,36 @@ def predict_api(
     user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
+# ------------- inside predict_api --------------
     result = predict(request.disease, request.data)
 
     risk = result["prediction"]["risk"]
     confidence = result["prediction"]["confidence"]
-
+    
+    
+    # Time-based duplicate check
+    one_hour_ago = datetime.utcnow() - timedelta(hours=1)
+    
+    # Check similar prediction (not exact float match)
+    existing = db.query(Prediction).filter(
+        Prediction.patient_id == user["id"],
+        Prediction.disease == request.disease,
+        Prediction.created_at >= one_hour_ago,
+        and_(
+            Prediction.probability >= confidence - 0.01,  # Allow small margin
+            Prediction.probability <= confidence + 0.01
+        )
+    ).first()
+    
+    # Skip if duplicate
+    if existing:
+        return {
+            "status": "success",
+            "message": "Duplicate prediction skipped",
+            "data": result["prediction"]
+        }
+    
+    # Save only if not duplicate
     save_prediction(
         db=db,
         patient_id=user["id"],
@@ -64,7 +90,10 @@ def predict_api(
         model_version="v1.0"
     )
 
-    return result
+    return {
+        "status": "success",
+        "data": result["prediction"]
+        }
 
 
 # ------------------ HISTORY ------------------
@@ -74,14 +103,17 @@ def get_history(
     user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    query = db.query(Prediction).filter(
+    Predictions = db.query(Prediction).filter(
         Prediction.patient_id == user["id"]
-    )
+    ).order_by(Prediction.created_at.desc()).limit(5).all()
 
     if disease:
-        query = query.filter(Prediction.disease == disease)
+        Predictions = db.query(Prediction).filter(
+            Prediction.patient_id == user["id"],
+            Prediction.disease == disease
+        ).order_by(Prediction.created_at.desc()).limit(5).all()
 
-    return query.all()
+    return Predictions
 
 
 # ------------------ PATIENT DASHBOARD ------------------
@@ -102,13 +134,15 @@ def patient_dashboard(
 
     predictions = db.query(Prediction).filter(
         Prediction.patient_id == patient.patient_id
-    ).all()
+    ).order_by(Prediction.created_at.desc()).limit(5).all()
 
     return {
-        "patient_profile": patient,
-        "predictions": predictions
+        "status": "success",
+        "data" : {
+            "patient_profile": patient,
+            "predictions": predictions
+        }
     }
-
 
 # ------------------ DOCTOR DASHBOARD ------------------
 @app.get("/dashboard/doctor")
@@ -151,15 +185,19 @@ def doctor_dashboard(
             "predictions": [{
                 "disease": p.disease,
                 "risk": p.risk_level,
-                "confidence": p.probability
+                "confidence": p.probability,
+                "time" : p.created_at
             }
                 for p in predictions
             ]
         })
 
     return {
-        "doctor_profile": doctor,
-        "patients": patients_data
+        "status": "success",
+        "data": {
+            "doctor_profile": doctor,
+            "patients": patients_data
+        }
     }
 
 
@@ -225,7 +263,13 @@ def create_patient_profile(
     ).first()
 
     if existing:
-        return {"message": "Profile already exists"}
+        existing.name = name
+        existing.age = age
+        existing.gender = gender
+        existing.height_cm = height_cm
+        existing.weight_kg = weight_kg
+        db.commit()
+        return {"message": "Profile updated"}
 
     profile = PatientProfile(
         patient_id=user["id"],
@@ -260,7 +304,12 @@ def create_doctor_profile(
     ).first()
 
     if existing:
-        return {"message": "Profile already exists"}
+        existing.name = name
+        existing.specialization = specialization
+        existing.hospital = hospital
+        existing.license_no = license_no
+        db.commit()
+        return {"message": "Profile updated"}
 
     profile = DoctorProfile(
         doctor_id=user["id"],
