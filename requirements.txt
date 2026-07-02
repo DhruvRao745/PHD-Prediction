@@ -1,6 +1,15 @@
 fastapi
 uvicorn
-scikit-learn
+pydantic
+SQLAlchemy
+psycopg2-binary
+passlib
+bcrypt==4.0.1
+python-jose
+python-multipart
+reportlab
+scikit-learn==1.7.2
 pandas
 joblib
-docker = docker exec -it health-postgres psql -U health_user -d health_db
+numpy
+streamlit

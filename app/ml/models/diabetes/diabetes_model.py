@@ -45,24 +45,6 @@ DIABETES_RANGES = {
     "DiabetesPedigreeFunction": (0, 3)
 }
 
-# def validate_diabetes_input(data):
-#     missing_fields = [
-#         field for field in DIABETES_REQUIRED_FIELDS
-#         if field not in data
-#     ]
-
-#     if missing_fields:
-#         return {
-#             "error": f"Missing required fields: {', '.join(missing_fields)}"
-#         }
-#     # Check numeric type + range
-#     errors = validate_numeric(data, DIABETES_RANGES)
-
-#     if errors:
-#         return {"error": errors}
-
-#     return None
-
 def validate_diabetes_input(data):
 
     errors = validate_schema(data, DIABETES_SCHEMA)
