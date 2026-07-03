@@ -1,0 +1,98 @@
+// Field definitions for each disease's prediction form.
+// These mirror the backend schemas exactly (app/utils/schemas.py) so
+// the form and the API validation never drift apart. One generic
+// <PredictionForm> component renders all four from this config,
+// instead of writing four nearly-identical forms by hand.
+
+export const DISEASES = {
+  diabetes: {
+    label: "Diabetes",
+    fields: [
+      { name: "Age", label: "Age", type: "number", min: 0, max: 120, step: 1 },
+      { name: "Pregnancies", label: "Pregnancies", type: "number", min: 0, max: 20, step: 1 },
+      { name: "Glucose", label: "Glucose (mg/dL)", type: "number", min: 0, max: 300, step: 1 },
+      { name: "BloodPressure", label: "Blood Pressure (mm Hg)", type: "number", min: 0, max: 200, step: 1 },
+      { name: "SkinThickness", label: "Skin Thickness (mm)", type: "number", min: 0, max: 100, step: 1 },
+      { name: "Insulin", label: "Insulin (mu U/mL)", type: "number", min: 0, max: 900, step: 1 },
+      { name: "BMI", label: "BMI", type: "number", min: 0, max: 70, step: 0.1 },
+      { name: "DiabetesPedigreeFunction", label: "Diabetes Pedigree Function", type: "number", min: 0, max: 3, step: 0.01 },
+    ],
+  },
+
+  heart: {
+    label: "Heart Disease",
+    fields: [
+      { name: "age", label: "Age", type: "number", min: 0, max: 120, step: 1 },
+      { name: "sex", label: "Sex", type: "select", options: [{ value: 0, label: "Female" }, { value: 1, label: "Male" }] },
+      { name: "cp", label: "Chest Pain Type (0-3)", type: "number", min: 0, max: 3, step: 1 },
+      { name: "trestbps", label: "Resting Blood Pressure (mm Hg)", type: "number", min: 0, max: 250, step: 1 },
+      { name: "chol", label: "Serum Cholesterol (mg/dL)", type: "number", min: 0, max: 600, step: 1 },
+      { name: "fbs", label: "Fasting Blood Sugar > 120 mg/dL", type: "select", options: [{ value: 0, label: "No" }, { value: 1, label: "Yes" }] },
+      { name: "restecg", label: "Resting ECG Result (0-2)", type: "number", min: 0, max: 2, step: 1 },
+      { name: "thalach", label: "Max Heart Rate Achieved", type: "number", min: 0, max: 250, step: 1 },
+      { name: "exang", label: "Exercise Induced Angina", type: "select", options: [{ value: 0, label: "No" }, { value: 1, label: "Yes" }] },
+      { name: "oldpeak", label: "ST Depression (oldpeak)", type: "number", min: 0, max: 10, step: 0.1 },
+      { name: "slope", label: "Slope of Peak Exercise ST (0-2)", type: "number", min: 0, max: 2, step: 1 },
+      { name: "ca", label: "Major Vessels Colored (0-4)", type: "number", min: 0, max: 4, step: 1 },
+      { name: "thal", label: "Thalassemia (0-3)", type: "number", min: 0, max: 3, step: 1 },
+    ],
+  },
+
+  parkinsons: {
+    label: "Parkinson's Disease",
+    fields: [
+      { name: "MDVP:Fo(Hz)", label: "MDVP:Fo(Hz)", type: "number", min: 0, max: 500, step: 0.001 },
+      { name: "MDVP:Fhi(Hz)", label: "MDVP:Fhi(Hz)", type: "number", min: 0, max: 600, step: 0.001 },
+      { name: "MDVP:Flo(Hz)", label: "MDVP:Flo(Hz)", type: "number", min: 0, max: 400, step: 0.001 },
+      { name: "MDVP:Jitter(%)", label: "MDVP:Jitter(%)", type: "number", min: 0, max: 1, step: 0.0001 },
+      { name: "MDVP:Jitter(Abs)", label: "MDVP:Jitter(Abs)", type: "number", min: 0, max: 1, step: 0.000001 },
+      { name: "MDVP:RAP", label: "MDVP:RAP", type: "number", min: 0, max: 1, step: 0.0001 },
+      { name: "MDVP:PPQ", label: "MDVP:PPQ", type: "number", min: 0, max: 1, step: 0.0001 },
+      { name: "Jitter:DDP", label: "Jitter:DDP", type: "number", min: 0, max: 1, step: 0.0001 },
+      { name: "MDVP:Shimmer", label: "MDVP:Shimmer", type: "number", min: 0, max: 1, step: 0.0001 },
+      { name: "MDVP:Shimmer(dB)", label: "MDVP:Shimmer(dB)", type: "number", min: 0, max: 5, step: 0.01 },
+      { name: "Shimmer:APQ3", label: "Shimmer:APQ3", type: "number", min: 0, max: 1, step: 0.0001 },
+      { name: "Shimmer:APQ5", label: "Shimmer:APQ5", type: "number", min: 0, max: 1, step: 0.0001 },
+      { name: "MDVP:APQ", label: "MDVP:APQ", type: "number", min: 0, max: 1, step: 0.0001 },
+      { name: "Shimmer:DDA", label: "Shimmer:DDA", type: "number", min: 0, max: 1, step: 0.0001 },
+      { name: "NHR", label: "NHR", type: "number", min: 0, max: 1, step: 0.0001 },
+      { name: "HNR", label: "HNR", type: "number", min: 0, max: 50, step: 0.001 },
+      { name: "RPDE", label: "RPDE", type: "number", min: 0, max: 1, step: 0.0001 },
+      { name: "DFA", label: "DFA", type: "number", min: 0, max: 1, step: 0.0001 },
+      { name: "spread1", label: "spread1", type: "number", min: -10, max: 10, step: 0.0001 },
+      { name: "spread2", label: "spread2", type: "number", min: -10, max: 10, step: 0.0001 },
+      { name: "D2", label: "D2", type: "number", min: 0, max: 10, step: 0.0001 },
+      { name: "PPE", label: "PPE", type: "number", min: 0, max: 1, step: 0.0001 },
+    ],
+  },
+
+  kidney: {
+    label: "Kidney Disease (CKD)",
+    fields: [
+      { name: "age", label: "Age", type: "number", min: 1, max: 120, step: 1 },
+      { name: "bp", label: "Blood Pressure (mm Hg)", type: "number", min: 40, max: 250, step: 1 },
+      { name: "sg", label: "Specific Gravity", type: "number", min: 1.0, max: 1.03, step: 0.001 },
+      { name: "al", label: "Albumin (0-5)", type: "number", min: 0, max: 5, step: 1 },
+      { name: "su", label: "Sugar (0-5)", type: "number", min: 0, max: 5, step: 1 },
+      { name: "rbc", label: "Red Blood Cells", type: "select", options: ["normal", "abnormal"] },
+      { name: "pc", label: "Pus Cell", type: "select", options: ["normal", "abnormal"] },
+      { name: "pcc", label: "Pus Cell Clumps", type: "select", options: ["present", "notpresent"] },
+      { name: "ba", label: "Bacteria", type: "select", options: ["present", "notpresent"] },
+      { name: "bgr", label: "Blood Glucose Random", type: "number", min: 20, max: 600, step: 1 },
+      { name: "bu", label: "Blood Urea", type: "number", min: 1, max: 400, step: 1 },
+      { name: "sc", label: "Serum Creatinine", type: "number", min: 0.1, max: 80, step: 0.1 },
+      { name: "sod", label: "Sodium", type: "number", min: 80, max: 180, step: 1 },
+      { name: "pot", label: "Potassium", type: "number", min: 2, max: 10, step: 0.1 },
+      { name: "hemo", label: "Hemoglobin", type: "number", min: 3, max: 20, step: 0.1 },
+      { name: "pcv", label: "Packed Cell Volume", type: "number", min: 5, max: 70, step: 1 },
+      { name: "wc", label: "White Blood Cell Count", type: "number", min: 1000, max: 50000, step: 100 },
+      { name: "rc", label: "Red Blood Cell Count", type: "number", min: 1, max: 10, step: 0.1 },
+      { name: "htn", label: "Hypertension", type: "select", options: ["yes", "no"] },
+      { name: "dm", label: "Diabetes Mellitus", type: "select", options: ["yes", "no"] },
+      { name: "cad", label: "Coronary Artery Disease", type: "select", options: ["yes", "no"] },
+      { name: "appet", label: "Appetite", type: "select", options: ["good", "poor"] },
+      { name: "pe", label: "Pedal Edema", type: "select", options: ["yes", "no"] },
+      { name: "ane", label: "Anemia", type: "select", options: ["yes", "no"] },
+    ],
+  },
+};

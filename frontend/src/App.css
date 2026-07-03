@@ -1,0 +1,163 @@
+.navbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 1rem 2rem;
+  border-bottom: 1px solid #ddd;
+}
+
+.navbar .brand {
+  font-weight: 600;
+  text-decoration: none;
+  color: inherit;
+}
+
+.nav-links a,
+.nav-links .link-button {
+  margin-left: 1rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.link-button {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+
+.page {
+  max-width: 640px;
+  margin: 2rem auto;
+  padding: 0 1rem;
+}
+
+.form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  max-width: 320px;
+}
+
+.form label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.form input,
+.form select {
+  padding: 0.5rem;
+  font-size: 1rem;
+}
+
+.form button {
+  padding: 0.6rem;
+  cursor: pointer;
+}
+
+.error {
+  color: #c0392b;
+}
+
+.success {
+  color: #2e7d32;
+}
+
+.card {
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  padding: 1rem;
+  margin: 1rem 0;
+}
+
+.button-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 1rem 0;
+}
+
+.button-link {
+  padding: 0.5rem 0.9rem;
+  border: 1px solid #333;
+  border-radius: 4px;
+  text-decoration: none;
+  color: inherit;
+}
+
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin-top: 1rem;
+}
+
+th,
+td {
+  text-align: left;
+  padding: 0.4rem;
+  border-bottom: 1px solid #ddd;
+}
+
+.predict-form {
+  max-width: 480px;
+}
+
+.result {
+  margin-top: 1.5rem;
+  padding: 1rem;
+  border-radius: 6px;
+  border: 1px solid #ddd;
+}
+
+.result.high-risk {
+  border-color: #c0392b;
+}
+
+.result.low-risk {
+  border-color: #2e7d32;
+}
+
+.note {
+  font-style: italic;
+  color: #666;
+}
+
+.bulk-fill {
+  max-width: 480px;
+  border: 1px dashed #999;
+  border-radius: 6px;
+  padding: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
+.bulk-fill h4 {
+  margin-top: 0;
+}
+
+.bulk-fill .hint {
+  font-size: 0.85rem;
+  color: #666;
+}
+
+.bulk-fill textarea {
+  width: 100%;
+  box-sizing: border-box;
+  font-family: monospace;
+  padding: 0.5rem;
+  margin: 0.5rem 0;
+}
+
+.locked-hint {
+  font-size: 0.75rem;
+  font-weight: normal;
+  color: #888;
+}
+
+.form input:disabled,
+.form select:disabled {
+  background: #f0f0f0;
+  color: #555;
+}
