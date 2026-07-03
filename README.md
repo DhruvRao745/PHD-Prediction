@@ -32,7 +32,7 @@ http://127.0.0.1:8000/docs
 ## Screenshots
 
 ### FastAPI
-![Fast API UI](<pics/Fast API UI.png>)
+![FastAPI UI](<pics/Fast API UI.png>)
 
 ### Patient Dashboard
 ![Patient](pics/Patient_Dashboard.png)
