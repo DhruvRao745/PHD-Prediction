@@ -52,6 +52,19 @@ def predict(disease, data):
             "details": str(exc),
         }
 
+    # diabetes/heart/parkinsons validate internally and return
+    # {"error": [...]} instead of raising - normalize that into the
+    # same top-level shape kidney validation already uses, so callers
+    # (main.py's /predict) only ever need to check one thing.
+    if isinstance(result, dict) and "error" in result:
+        details = result["error"]
+        if not isinstance(details, list):
+            details = [details]
+        return {
+            "error": "Validation failed",
+            "details": details,
+        }
+
     return {
         "disease": disease,
         "prediction": result,

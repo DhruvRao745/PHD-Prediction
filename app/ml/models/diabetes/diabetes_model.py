@@ -1,5 +1,6 @@
 import joblib
 import os
+import pandas as pd
 from app.utils.validation import check_missing_fields, check_numeric_fields, validate_numeric, validate_schema
 from app.utils.schemas import DIABETES_SCHEMA
 
@@ -77,24 +78,29 @@ def real_diabetes_model(data):
     if validation_error:
         return validation_error
 
-    features = [[
-        data["Age"],
-        data["Pregnancies"],
-        data["Glucose"],
-        data["BloodPressure"],
-        data["SkinThickness"],
-        data["Insulin"],
-        data["BMI"],
-        data["DiabetesPedigreeFunction"]
-    ]]
+    # Build a DataFrame with the same column names/order the pipeline
+    # was trained on (see train_diabetes_model.py).
+    features = pd.DataFrame(
+        [[data[field] for field in DIABETES_REQUIRED_FIELDS]],
+        columns=DIABETES_REQUIRED_FIELDS,
+    )
 
-    probability = float(diabetes_model.predict_proba(features)[0][1])
-    
-    raw_probs = diabetes_model.predict_proba(features)
-    print("RAW PROBS:", raw_probs)
-
+    # diabetes_model is a Pipeline(imputer -> scaler -> model). Calling
+    # .predict_proba() on the whole pipeline still warns, because
+    # SimpleImputer.transform() returns a plain numpy array internally,
+    # so the scaler step loses the column names even when we pass a
+    # named DataFrame in. Stepping through manually and re-wrapping each
+    # intermediate result keeps the names all the way through.
+    imputed = pd.DataFrame(
+        diabetes_model.named_steps["imputer"].transform(features),
+        columns=DIABETES_REQUIRED_FIELDS,
+    )
+    scaled = pd.DataFrame(
+        diabetes_model.named_steps["scaler"].transform(imputed),
+        columns=DIABETES_REQUIRED_FIELDS,
+    )
+    raw_probs = diabetes_model.named_steps["model"].predict_proba(scaled)
     probability = float(raw_probs[0][1])
-
 
     return {
         "risk": "High Risk" if probability >= 0.5 else "Low Risk",

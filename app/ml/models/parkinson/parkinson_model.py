@@ -1,5 +1,6 @@
 import os
 import joblib
+import pandas as pd
 from app.utils.validation import check_missing_fields, check_numeric_fields, validate_schema
 from app.utils.schemas import PARKINSONS_SCHEMA
 
@@ -59,13 +60,25 @@ def real_parkinsons_model(data):
     if validation_error:
         return validation_error
 
-    features = [[data[f] for f in PARKINSONS_REQUIRED_FIELDS]]
+    # Named DataFrame matching training column order (train_parkinson_model.py).
+    features = pd.DataFrame(
+        [[data[f] for f in PARKINSONS_REQUIRED_FIELDS]],
+        columns=PARKINSONS_REQUIRED_FIELDS,
+    )
 
-    probability = float(parkinsons_model.predict_proba(features)[0][1])
-    
-    raw_probs = parkinsons_model.predict_proba(features)
-    print("RAW PROBS:", raw_probs)
-    
+    # Step through the pipeline manually instead of calling
+    # parkinsons_model.predict_proba() directly - SimpleImputer.transform()
+    # drops back to a plain numpy array internally, so the scaler step
+    # would still warn even with a named DataFrame as the initial input.
+    imputed = pd.DataFrame(
+        parkinsons_model.named_steps["imputer"].transform(features),
+        columns=PARKINSONS_REQUIRED_FIELDS,
+    )
+    scaled = pd.DataFrame(
+        parkinsons_model.named_steps["scaler"].transform(imputed),
+        columns=PARKINSONS_REQUIRED_FIELDS,
+    )
+    raw_probs = parkinsons_model.named_steps["model"].predict_proba(scaled)
     probability = float(raw_probs[0][1])
 
     return {
