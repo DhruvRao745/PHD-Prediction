@@ -2,7 +2,7 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from app.database import SessionLocal
 from app.models.account import Account
-from .security import hash_password, verify_password, create_token
+from .security import hash_password, verify_password, create_token, get_current_user
 from fastapi.security import OAuth2PasswordRequestForm
 from fastapi import Depends
 from app.models.patient_profile import PatientProfile
@@ -87,3 +87,10 @@ def login(form_data: OAuth2PasswordRequestForm = Depends()):
         "access_token": token,
         "token_type": "bearer"
     }
+
+# -------- CURRENT USER --------
+# Used by the frontend right after login to find out the user's
+# id/role/username, since the JWT itself only carries the user id.
+@router.get("/me")
+def get_me(user: dict = Depends(get_current_user)):
+    return user

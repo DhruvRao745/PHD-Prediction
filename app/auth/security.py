@@ -44,7 +44,8 @@ def get_current_user(token: str = Depends(oauth2_scheme)):
 
         return {
             "id": user.id,
-            "role": user.role   # 🔥 THIS LINE IS MISSING IN YOUR CODE
+            "role": user.role,
+            "username": user.username
         }
 
     except JWTError:

@@ -1,15 +1,12 @@
 from fastapi import FastAPI, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 import sys
 from pathlib import Path
-from streamlit import user
 from app.registry.model_registry import MODEL_REGISTRY
 from app.auth.routes import router as auth_router
 from app.auth.security import get_current_user
 from app.database import SessionLocal
-from fastapi.responses import FileResponse
-from reportlab.lib.pagesizes import letter
-from reportlab.pdfgen import canvas
 from datetime import datetime
 from app.deps import get_db
 from app.services.prediction_service import save_prediction
@@ -32,6 +29,19 @@ except ModuleNotFoundError:
     from core.predictor import predict
 
 app = FastAPI()
+
+# Allow the React (Vite) dev server to call this API from the browser.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+    ],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
 app.include_router(auth_router)
 
 
