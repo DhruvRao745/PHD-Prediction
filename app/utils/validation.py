@@ -64,3 +64,53 @@ def validate_schema(data, schema):
             )
 
     return errors
+
+
+def validate_kidney_schema(
+    data,
+    numeric_schema,
+    categorical_schema,
+):
+    errors = []
+
+    # Validate numeric fields
+    for field, (min_val, max_val) in numeric_schema.items():
+
+        if field not in data:
+            errors.append(f"{field} is missing")
+            continue
+
+        value = data[field]
+
+        if not isinstance(value, (int, float)):
+            errors.append(f"{field} must be a number")
+            continue
+
+        if value < min_val or value > max_val:
+            errors.append(
+                f"{field} must be between "
+                f"{min_val} and {max_val}"
+            )
+
+    # Validate categorical fields
+    for field, allowed_values in categorical_schema.items():
+
+        if field not in data:
+            errors.append(f"{field} is missing")
+            continue
+
+        value = data[field]
+
+        if not isinstance(value, str):
+            errors.append(f"{field} must be text")
+            continue
+
+        cleaned_value = value.strip().lower()
+
+        if cleaned_value not in allowed_values:
+            errors.append(
+                f"{field} must be one of: "
+                f"{', '.join(allowed_values)}"
+            )
+
+    return errors

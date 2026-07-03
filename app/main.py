@@ -53,6 +53,11 @@ def predict_api(
 # ------------- inside predict_api --------------
     result = predict(request.disease, request.data)
 
+    if "error" in result:
+        raise HTTPException(
+            status_code=400,
+            detail=result,
+        )
     risk = result["prediction"]["risk"]
     confidence = result["prediction"]["confidence"]
     
