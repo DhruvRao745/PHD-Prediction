@@ -60,3 +60,38 @@ PARKINSONS_SCHEMA = {
     "D2": (0, 10),
     "PPE": (0, 1)
 }
+
+# ================================
+# 🫘 Kidney Disease Schema
+# ================================
+
+KIDNEY_NUMERIC_SCHEMA = {
+    "age": (1, 120),
+    "bp": (40, 250),
+    "sg": (1.000, 1.030),
+    "al": (0, 5),
+    "su": (0, 5),
+    "bgr": (20, 600),
+    "bu": (1, 400),
+    "sc": (0.1, 80),
+    "sod": (80, 180),
+    "pot": (2, 10),
+    "hemo": (3, 20),
+    "pcv": (5, 70),
+    "wc": (1000, 50000),
+    "rc": (1, 10)
+}
+
+
+KIDNEY_CATEGORICAL_SCHEMA = {
+    "rbc": ["normal", "abnormal"],
+    "pc": ["normal", "abnormal"],
+    "pcc": ["present", "notpresent"],
+    "ba": ["present", "notpresent"],
+    "htn": ["yes", "no"],
+    "dm": ["yes", "no"],
+    "cad": ["yes", "no"],
+    "appet": ["good", "poor"],
+    "pe": ["yes", "no"],
+    "ane": ["yes", "no"]
+}
