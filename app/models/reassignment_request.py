@@ -24,5 +24,9 @@ class ReassignmentRequest(Base):
 
     status = Column(String, default="pending")  # pending / approved / denied
 
+    # Admin's explanation for the decision - mainly useful on denials, so
+    # the patient isn't just left with "denied" and no reason why.
+    admin_note = Column(String, nullable=True)
+
     created_at = Column(DateTime, default=datetime.utcnow)
     resolved_at = Column(DateTime, nullable=True)

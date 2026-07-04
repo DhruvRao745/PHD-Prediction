@@ -17,6 +17,7 @@ from app.models.doctor_profile import DoctorProfile
 from app.models.doctor_patient import DoctorPatient
 from app.models.prediction import Prediction
 from app.models.reassignment_request import ReassignmentRequest
+from app.models.profile_change_request import ProfileChangeRequest
 from datetime import datetime, timedelta
 from sqlalchemy import and_
 
@@ -306,83 +307,195 @@ def request_reassignment(
     return {"message": "Reassignment request submitted"}
 
 
-# --------- Patient Profile API ---------
-@app.post("/profile/patient")
-def create_patient_profile(
-    name: str,
-    age: int,
-    gender: str,
-    height_cm: float,
-    weight_kg: float,
+# So a patient can actually see the outcome of their own request instead
+# of submitting it into a void - status plus admin_note if it was denied.
+@app.get("/reassignment-requests")
+def my_reassignment_requests(
     user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    print("User from token:", user)  # 🔥 DEBUGGING LINE 
+    if user["role"] != "patient":
+        raise HTTPException(403, "Only patients can view their reassignment requests")
+
+    return db.query(ReassignmentRequest).filter(
+        ReassignmentRequest.patient_id == user["id"]
+    ).order_by(ReassignmentRequest.created_at.desc()).all()
+
+
+# --------- Patient Profile API ---------
+# `name` is NOT here - patients can't rename themselves directly, they
+# have to submit a request via /profile/change-request for admin
+# approval. Everything else (age/gender/height/weight) is their own
+# self-reported data, so it's a direct partial update.
+class PatientProfileUpdate(BaseModel):
+    age: int | None = None
+    gender: str | None = None
+    height_cm: float | None = None
+    weight_kg: float | None = None
+
+
+@app.get("/profile/patient")
+def get_patient_profile(
+    user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
     if user["role"] != "patient":
         raise HTTPException(403, "Only patients allowed")
 
-    existing = db.query(PatientProfile).filter(
+    profile = db.query(PatientProfile).filter(
         PatientProfile.patient_id == user["id"]
     ).first()
 
-    if existing:
-        existing.name = name
-        existing.age = age
-        existing.gender = gender
-        existing.height_cm = height_cm
-        existing.weight_kg = weight_kg
-        db.commit()
-        return {"message": "Profile updated"}
+    if not profile:
+        raise HTTPException(404, "Patient profile not found")
 
-    profile = PatientProfile(
-        patient_id=user["id"],
-        name=name,
-        age=age,
-        gender=gender,
-        height_cm=height_cm,
-        weight_kg=weight_kg
-    )
+    return profile
 
-    db.add(profile)
+
+@app.patch("/profile/patient")
+def update_patient_profile(
+    data: PatientProfileUpdate,
+    user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if user["role"] != "patient":
+        raise HTTPException(403, "Only patients allowed")
+
+    profile = db.query(PatientProfile).filter(
+        PatientProfile.patient_id == user["id"]
+    ).first()
+
+    if not profile:
+        raise HTTPException(404, "Patient profile not found")
+
+    # exclude_unset means only fields the client actually sent get
+    # touched - this is the real fix for "it made me fill in everything
+    # just to change one field".
+    for field, value in data.dict(exclude_unset=True).items():
+        setattr(profile, field, value)
+
     db.commit()
 
-    return {"message": "Patient profile created"}
-   
+    return {"message": "Profile updated"}
+
 
 # --------- Doctor Profile API ---------
-@app.post("/profile/doctor")
-def create_doctor_profile(
-    name: str,
-    specialization: str,
-    hospital: str,
-    license_no: str,
+# Only license_no lives here, and only until it's set once. name,
+# specialization, and hospital all require admin approval via
+# /profile/change-request. If license_no itself gets entered wrong,
+# that's fixed only by admin directly (/admin/doctors/{id}/license) -
+# a doctor can never touch it themselves once it's set.
+class DoctorProfileUpdate(BaseModel):
+    license_no: str | None = None
+
+
+@app.get("/profile/doctor")
+def get_doctor_profile(
     user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
     if user["role"] != "doctor":
         raise HTTPException(403, "Only doctors allowed")
 
-    existing = db.query(DoctorProfile).filter(
+    profile = db.query(DoctorProfile).filter(
         DoctorProfile.doctor_id == user["id"]
     ).first()
 
-    if existing:
-        existing.name = name
-        existing.specialization = specialization
-        existing.hospital = hospital
-        existing.license_no = license_no
-        db.commit()
-        return {"message": "Profile updated"}
+    if not profile:
+        raise HTTPException(404, "Doctor profile not found")
 
-    profile = DoctorProfile(
-        doctor_id=user["id"],
-        name=name,
-        specialization=specialization,
-        hospital=hospital,
-        license_no=license_no
+    return profile
+
+
+@app.patch("/profile/doctor")
+def update_doctor_profile(
+    data: DoctorProfileUpdate,
+    user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if user["role"] != "doctor":
+        raise HTTPException(403, "Only doctors allowed")
+
+    profile = db.query(DoctorProfile).filter(
+        DoctorProfile.doctor_id == user["id"]
+    ).first()
+
+    if not profile:
+        raise HTTPException(404, "Doctor profile not found")
+
+    if data.license_no is not None:
+        if profile.license_no:
+            raise HTTPException(400, "License number is already set - contact admin to correct it")
+        profile.license_no = data.license_no
+        db.commit()
+
+    return {"message": "Profile updated"}
+
+
+# --------- Profile Change Requests (name / hospital / specialization) ---------
+# These fields are gated behind admin approval instead of direct edits:
+#   - patient: name
+#   - doctor: name, hospital, specialization
+# Same request -> admin approve/deny shape as /reassignment-request.
+PATIENT_REQUESTABLE_FIELDS = {"name"}
+# "license_no" here is a report, not a real request - admin never
+# auto-applies it on approval (see resolve_profile_change_request).
+# It exists so a doctor has an actual way to flag a wrong license
+# number instead of just being told "contact admin" with no path to
+# do so. Admin still fixes it manually via /admin/doctors/{id}/license.
+DOCTOR_REQUESTABLE_FIELDS = {"name", "hospital", "specialization", "license_no"}
+
+
+class ProfileChangeRequestData(BaseModel):
+    field: str
+    requested_value: str
+    reason: str | None = None
+
+
+@app.post("/profile/change-request")
+def request_profile_change(
+    data: ProfileChangeRequestData,
+    user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if user["role"] == "patient":
+        allowed_fields = PATIENT_REQUESTABLE_FIELDS
+    elif user["role"] == "doctor":
+        allowed_fields = DOCTOR_REQUESTABLE_FIELDS
+    else:
+        raise HTTPException(403, "Only patients and doctors can request profile changes")
+
+    if data.field not in allowed_fields:
+        raise HTTPException(400, f"'{data.field}' cannot be requested for {user['role']}s")
+
+    existing_pending = db.query(ProfileChangeRequest).filter(
+        ProfileChangeRequest.account_id == user["id"],
+        ProfileChangeRequest.field == data.field,
+        ProfileChangeRequest.status == "pending"
+    ).first()
+
+    if existing_pending:
+        raise HTTPException(400, f"You already have a pending request to change '{data.field}'")
+
+    request_row = ProfileChangeRequest(
+        account_id=user["id"],
+        role=user["role"],
+        field=data.field,
+        requested_value=data.requested_value,
+        reason=data.reason
     )
 
-    db.add(profile)
+    db.add(request_row)
     db.commit()
 
-    return {"message": "Doctor profile created"}
+    return {"message": "Profile change request submitted"}
+
+
+@app.get("/profile/change-requests")
+def my_profile_change_requests(
+    user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    return db.query(ProfileChangeRequest).filter(
+        ProfileChangeRequest.account_id == user["id"]
+    ).order_by(ProfileChangeRequest.created_at.desc()).all()

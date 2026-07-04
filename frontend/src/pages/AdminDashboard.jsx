@@ -9,6 +9,7 @@ export default function AdminDashboard() {
   const [deletedAssignments, setDeletedAssignments] = useState([]);
   const [deletedPredictions, setDeletedPredictions] = useState([]);
   const [requests, setRequests] = useState([]);
+  const [profileRequests, setProfileRequests] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -19,25 +20,38 @@ export default function AdminDashboard() {
   const [assignPatientId, setAssignPatientId] = useState("");
   const [assigning, setAssigning] = useState(false);
 
+  const [licenseDoctorId, setLicenseDoctorId] = useState("");
+  const [licenseValue, setLicenseValue] = useState("");
+  const [savingLicense, setSavingLicense] = useState(false);
+
   async function loadAll() {
     setLoading(true);
     setError("");
     try {
-      const [doctorsRes, patientsRes, assignmentsRes, deletedAssignRes, deletedPredRes, requestsRes] =
-        await Promise.all([
-          apiFetch("/admin/doctors"),
-          apiFetch("/admin/patients"),
-          apiFetch("/admin/assignments"),
-          apiFetch("/admin/assignments/deleted"),
-          apiFetch("/admin/predictions/deleted"),
-          apiFetch("/admin/reassignment-requests"),
-        ]);
+      const [
+        doctorsRes,
+        patientsRes,
+        assignmentsRes,
+        deletedAssignRes,
+        deletedPredRes,
+        requestsRes,
+        profileRequestsRes,
+      ] = await Promise.all([
+        apiFetch("/admin/doctors"),
+        apiFetch("/admin/patients"),
+        apiFetch("/admin/assignments"),
+        apiFetch("/admin/assignments/deleted"),
+        apiFetch("/admin/predictions/deleted"),
+        apiFetch("/admin/reassignment-requests"),
+        apiFetch("/admin/profile-change-requests"),
+      ]);
       setDoctors(doctorsRes);
       setPatients(patientsRes);
       setAssignments(assignmentsRes);
       setDeletedAssignments(deletedAssignRes);
       setDeletedPredictions(deletedPredRes);
       setRequests(requestsRes);
+      setProfileRequests(profileRequestsRes);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -105,12 +119,47 @@ export default function AdminDashboard() {
     apiFetch(`/admin/predictions/${id}/permanent`, { method: "DELETE" })
   );
 
+  // Denials always ask for a reason - the person on the other end has a
+  // right to know why, not just see "denied". Approvals can optionally
+  // get a note too but aren't forced to.
+  function promptForNote(status) {
+    if (status !== "denied") return null;
+    return window.prompt("Reason for denial (the requester will see this):") || null;
+  }
+
   const handleResolveRequest = flash((id, status) =>
     apiFetch(`/admin/reassignment-requests/${id}`, {
       method: "PATCH",
-      body: { status },
+      body: { status, note: promptForNote(status) },
     })
   );
+
+  const handleResolveProfileRequest = flash((id, status) =>
+    apiFetch(`/admin/profile-change-requests/${id}`, {
+      method: "PATCH",
+      body: { status, note: promptForNote(status) },
+    })
+  );
+
+  async function handleCorrectLicense(e) {
+    e.preventDefault();
+    setActionMessage("");
+    setActionError("");
+    setSavingLicense(true);
+    try {
+      const res = await apiFetch(`/admin/doctors/${licenseDoctorId}/license`, {
+        method: "PATCH",
+        body: { license_no: licenseValue },
+      });
+      setActionMessage(res.message);
+      setLicenseValue("");
+      await loadAll();
+    } catch (err) {
+      setActionError(err.message);
+    } finally {
+      setSavingLicense(false);
+    }
+  }
 
   if (loading) return <div className="page">Loading...</div>;
 
@@ -229,6 +278,91 @@ export default function AdminDashboard() {
           </tbody>
         </table>
       )}
+
+      <h3>Pending profile change requests</h3>
+      <p className="hint">
+        Name (patient/doctor) and specialization/hospital (doctor) changes
+        land here for approval instead of being self-edited. Approving one
+        writes the requested value straight into their profile - except
+        "license_no" rows, which are just reports: approving/denying only
+        closes the ticket, it does NOT change the license number. Use the
+        "Correct a doctor's license number" form below to actually apply
+        that fix.
+      </p>
+      {profileRequests.length === 0 && <p>No pending requests.</p>}
+      {profileRequests.length > 0 && (
+        <table>
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Role</th>
+              <th>Field</th>
+              <th>Requested Value</th>
+              <th>Reason</th>
+              <th>Requested At</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {profileRequests.map((r) => (
+              <tr key={r.id}>
+                <td>{r.username} (ID: {r.account_id})</td>
+                <td>{r.role}</td>
+                <td>{r.field}</td>
+                <td>{r.requested_value}</td>
+                <td>{r.reason || "—"}</td>
+                <td>{new Date(r.created_at).toLocaleString()}</td>
+                <td>
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => handleResolveProfileRequest(r.id, "approved")}
+                  >
+                    Approve
+                  </button>{" "}
+                  <button
+                    type="button"
+                    className="link-button"
+                    onClick={() => handleResolveProfileRequest(r.id, "denied")}
+                  >
+                    Deny
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+
+      <h3>Correct a doctor's license number</h3>
+      <p className="hint">
+        Doctors can only set their license number once and can never edit
+        it themselves afterward - use this to fix a typo.
+      </p>
+      <form
+        onSubmit={handleCorrectLicense}
+        className="form"
+        style={{ flexDirection: "row", alignItems: "flex-end", gap: "0.5rem", maxWidth: "none" }}
+      >
+        <label style={{ flex: 1 }}>
+          Doctor
+          <select value={licenseDoctorId} onChange={(e) => setLicenseDoctorId(e.target.value)} required>
+            <option value="">Select a doctor</option>
+            {doctors.map((d) => (
+              <option key={d.doctor_id} value={d.doctor_id}>
+                {d.name} (ID: {d.doctor_id})
+              </option>
+            ))}
+          </select>
+        </label>
+        <label style={{ flex: 1 }}>
+          Correct License Number
+          <input value={licenseValue} onChange={(e) => setLicenseValue(e.target.value)} required />
+        </label>
+        <button type="submit" disabled={savingLicense}>
+          {savingLicense ? "Saving..." : "Save"}
+        </button>
+      </form>
 
       <h3>Soft-deleted assignments</h3>
       {deletedAssignments.length === 0 && <p>None.</p>}

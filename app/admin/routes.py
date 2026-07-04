@@ -12,6 +12,7 @@ from app.models.doctor_profile import DoctorProfile
 from app.models.doctor_patient import DoctorPatient
 from app.models.prediction import Prediction
 from app.models.reassignment_request import ReassignmentRequest
+from app.models.profile_change_request import ProfileChangeRequest
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -283,6 +284,7 @@ def list_reassignment_requests(
             "doctor_username": doctor.username if doctor else None,
             "reason": r.reason,
             "status": r.status,
+            "admin_note": r.admin_note,
             "created_at": r.created_at,
             "resolved_at": r.resolved_at,
         })
@@ -291,6 +293,10 @@ def list_reassignment_requests(
 
 class ResolveRequestData(BaseModel):
     status: str  # "approved" or "denied"
+    # Admin's explanation for the decision. Not required, but the whole
+    # point of adding this is so a denial doesn't just say "denied" with
+    # zero context for the person who asked.
+    note: str | None = None
 
 
 @router.patch("/reassignment-requests/{request_id}")
@@ -320,7 +326,112 @@ def resolve_reassignment_request(
             relation.deleted_at = datetime.utcnow()
 
     req.status = data.status
+    req.admin_note = data.note
     req.resolved_at = datetime.utcnow()
     db.commit()
 
     return {"message": f"Request {data.status}"}
+
+
+# ------------------ PROFILE CHANGE REQUESTS ------------------
+# name (patient/doctor) and hospital/specialization (doctor) all route
+# through here instead of a direct self-edit - see /profile/change-request.
+
+@router.get("/profile-change-requests")
+def list_profile_change_requests(
+    status: str | None = None,
+    admin: dict = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    query = db.query(ProfileChangeRequest)
+    if status:
+        query = query.filter(ProfileChangeRequest.status == status)
+    else:
+        query = query.filter(ProfileChangeRequest.status == "pending")
+
+    rows = query.order_by(ProfileChangeRequest.created_at.desc()).all()
+
+    results = []
+    for r in rows:
+        account = db.query(Account).filter(Account.id == r.account_id).first()
+        results.append({
+            "id": r.id,
+            "account_id": r.account_id,
+            "username": account.username if account else None,
+            "role": r.role,
+            "field": r.field,
+            "requested_value": r.requested_value,
+            "reason": r.reason,
+            "status": r.status,
+            "admin_note": r.admin_note,
+            "created_at": r.created_at,
+            "resolved_at": r.resolved_at,
+        })
+    return results
+
+
+@router.patch("/profile-change-requests/{request_id}")
+def resolve_profile_change_request(
+    request_id: int,
+    data: ResolveRequestData,
+    admin: dict = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    if data.status not in ["approved", "denied"]:
+        raise HTTPException(400, "Status must be 'approved' or 'denied'")
+
+    req = db.query(ProfileChangeRequest).filter(ProfileChangeRequest.id == request_id).first()
+    if not req:
+        raise HTTPException(404, "Request not found")
+
+    if req.status != "pending":
+        raise HTTPException(400, f"Request already {req.status}")
+
+    # license_no reports are never auto-applied, even on approval - a
+    # doctor reporting "I think it should be X" isn't authoritative
+    # enough on its own. Admin must apply the actual fix separately via
+    # /admin/doctors/{doctor_id}/license, after however they choose to
+    # verify it. Approving here just acknowledges/closes the report.
+    if data.status == "approved" and req.field != "license_no":
+        if req.role == "patient":
+            profile = db.query(PatientProfile).filter(
+                PatientProfile.patient_id == req.account_id
+            ).first()
+        else:
+            profile = db.query(DoctorProfile).filter(
+                DoctorProfile.doctor_id == req.account_id
+            ).first()
+
+        if profile:
+            setattr(profile, req.field, req.requested_value)
+
+    req.status = data.status
+    req.admin_note = data.note
+    req.resolved_at = datetime.utcnow()
+    db.commit()
+
+    return {"message": f"Request {data.status}"}
+
+
+# ------------------ DIRECT LICENSE CORRECTION ------------------
+# license_no is permanently locked from the doctor's own side once set -
+# this is the only way to fix a typo, and it's deliberately admin-only.
+class LicenseCorrectionData(BaseModel):
+    license_no: str
+
+
+@router.patch("/doctors/{doctor_id}/license")
+def correct_doctor_license(
+    doctor_id: int,
+    data: LicenseCorrectionData,
+    admin: dict = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    profile = db.query(DoctorProfile).filter(DoctorProfile.doctor_id == doctor_id).first()
+    if not profile:
+        raise HTTPException(404, "Doctor profile not found")
+
+    profile.license_no = data.license_no
+    db.commit()
+
+    return {"message": "License number corrected"}

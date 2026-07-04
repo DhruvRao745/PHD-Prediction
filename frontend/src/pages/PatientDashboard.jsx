@@ -13,14 +13,19 @@ export default function PatientDashboard() {
   const [reassignMessage, setReassignMessage] = useState("");
   const [reassignError, setReassignError] = useState("");
   const [requestingReassign, setRequestingReassign] = useState(false);
+  const [reassignRequests, setReassignRequests] = useState([]);
 
   async function load() {
     setLoading(true);
     setError("");
     try {
-      const res = await apiFetch("/dashboard/patient");
+      const [res, requestsRes] = await Promise.all([
+        apiFetch("/dashboard/patient"),
+        apiFetch("/reassignment-requests"),
+      ]);
       setProfile(res.data.patient_profile);
       setPredictions(res.data.predictions || []);
+      setReassignRequests(requestsRes || []);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -54,6 +59,8 @@ export default function PatientDashboard() {
       });
       setReassignMessage(res.message);
       setReassignReason("");
+      const requestsRes = await apiFetch("/reassignment-requests");
+      setReassignRequests(requestsRes || []);
     } catch (err) {
       setReassignError(err.message);
     } finally {
@@ -128,6 +135,32 @@ export default function PatientDashboard() {
           {requestingReassign ? "Submitting..." : "Request Reassignment"}
         </button>
       </form>
+
+      {reassignRequests.length > 0 && (
+        <>
+          <h4>Your requests</h4>
+          <table>
+            <thead>
+              <tr>
+                <th>Status</th>
+                <th>Reason</th>
+                <th>Admin Note</th>
+                <th>Requested At</th>
+              </tr>
+            </thead>
+            <tbody>
+              {reassignRequests.map((r) => (
+                <tr key={r.id}>
+                  <td>{r.status}</td>
+                  <td>{r.reason || "—"}</td>
+                  <td>{r.admin_note || "—"}</td>
+                  <td>{new Date(r.created_at).toLocaleString()}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      )}
     </div>
   );
 }
