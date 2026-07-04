@@ -8,23 +8,58 @@ export default function PatientDashboard() {
   const [predictions, setPredictions] = useState([]);
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
+  const [deleteError, setDeleteError] = useState("");
+  const [reassignReason, setReassignReason] = useState("");
+  const [reassignMessage, setReassignMessage] = useState("");
+  const [reassignError, setReassignError] = useState("");
+  const [requestingReassign, setRequestingReassign] = useState(false);
+
+  async function load() {
+    setLoading(true);
+    setError("");
+    try {
+      const res = await apiFetch("/dashboard/patient");
+      setProfile(res.data.patient_profile);
+      setPredictions(res.data.predictions || []);
+    } catch (err) {
+      setError(err.message);
+    } finally {
+      setLoading(false);
+    }
+  }
 
   useEffect(() => {
-    async function load() {
-      setLoading(true);
-      setError("");
-      try {
-        const res = await apiFetch("/dashboard/patient");
-        setProfile(res.data.patient_profile);
-        setPredictions(res.data.predictions || []);
-      } catch (err) {
-        setError(err.message);
-      } finally {
-        setLoading(false);
-      }
-    }
     load();
   }, []);
+
+  async function handleDelete(id) {
+    setDeleteError("");
+    try {
+      await apiFetch(`/predictions/${id}`, { method: "DELETE" });
+      setPredictions((prev) => prev.filter((p) => p.id !== id));
+    } catch (err) {
+      setDeleteError(err.message);
+    }
+  }
+
+  async function handleRequestReassignment(e) {
+    e.preventDefault();
+    setReassignMessage("");
+    setReassignError("");
+    setRequestingReassign(true);
+    try {
+      const res = await apiFetch("/reassignment-request", {
+        method: "POST",
+        body: { reason: reassignReason || null },
+      });
+      setReassignMessage(res.message);
+      setReassignReason("");
+    } catch (err) {
+      setReassignError(err.message);
+    } finally {
+      setRequestingReassign(false);
+    }
+  }
 
   if (loading) return <div className="page">Loading...</div>;
 
@@ -55,13 +90,17 @@ export default function PatientDashboard() {
       </div>
 
       <h3>Recent predictions</h3>
+      {deleteError && <p className="error">{deleteError}</p>}
       {predictions.length === 0 && <p>No predictions yet.</p>}
       {predictions.length > 0 && (
         <ul>
           {predictions.map((p) => (
             <li key={p.id}>
               {DISEASES[p.disease]?.label || p.disease}: {p.risk_level} (
-              {p.probability}) — {new Date(p.created_at).toLocaleString()}
+              {p.probability}) — {new Date(p.created_at).toLocaleString()}{" "}
+              <button type="button" className="link-button" onClick={() => handleDelete(p.id)}>
+                Delete
+              </button>
             </li>
           ))}
         </ul>
@@ -69,6 +108,26 @@ export default function PatientDashboard() {
       <p>
         <Link to="/history">View full history</Link>
       </p>
+
+      <h3>Not happy with your assigned doctor?</h3>
+      <p className="hint">
+        You can't unassign a doctor yourself - submit a request and admin
+        will review it.
+      </p>
+      <form onSubmit={handleRequestReassignment} className="form">
+        <label>
+          Reason (optional)
+          <input
+            value={reassignReason}
+            onChange={(e) => setReassignReason(e.target.value)}
+          />
+        </label>
+        {reassignError && <p className="error">{reassignError}</p>}
+        {reassignMessage && <p className="success">{reassignMessage}</p>}
+        <button type="submit" disabled={requestingReassign}>
+          {requestingReassign ? "Submitting..." : "Request Reassignment"}
+        </button>
+      </form>
     </div>
   );
 }

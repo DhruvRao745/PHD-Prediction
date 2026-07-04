@@ -19,3 +19,8 @@ class DoctorPatient(Base):
     )
 
     assigned_at = Column(DateTime, default=datetime.utcnow)
+
+    # Soft delete: NULL = active assignment. Only admin can assign/unassign
+    # (soft-delete) doctor-patient links, and only admin can restore or
+    # permanently hard-delete one.
+    deleted_at = Column(DateTime, nullable=True)

@@ -6,6 +6,7 @@ from app.models.patient_profile import PatientProfile
 from app.models.doctor_profile import DoctorProfile
 from app.models.doctor_patient import DoctorPatient
 from app.models.prediction import Prediction
+from app.models.reassignment_request import ReassignmentRequest
 
 Base.metadata.create_all(bind=engine)
 

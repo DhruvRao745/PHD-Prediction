@@ -9,11 +9,6 @@ export default function DoctorDashboard() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
 
-  const [assignId, setAssignId] = useState("");
-  const [assignMessage, setAssignMessage] = useState("");
-  const [assignError, setAssignError] = useState("");
-  const [assigning, setAssigning] = useState(false);
-
   async function loadDashboard() {
     setLoading(true);
     setError("");
@@ -31,25 +26,6 @@ export default function DoctorDashboard() {
   useEffect(() => {
     loadDashboard();
   }, []);
-
-  async function handleAssign(e) {
-    e.preventDefault();
-    setAssignMessage("");
-    setAssignError("");
-    setAssigning(true);
-    try {
-      const res = await apiFetch(`/doctor/assign-patient?patient_id=${encodeURIComponent(assignId)}`, {
-        method: "POST",
-      });
-      setAssignMessage(res.message);
-      setAssignId("");
-      await loadDashboard();
-    } catch (err) {
-      setAssignError(err.message);
-    } finally {
-      setAssigning(false);
-    }
-  }
 
   if (loading) return <div className="page">Loading...</div>;
 
@@ -82,28 +58,7 @@ export default function DoctorDashboard() {
         <Link to="/history">View your prediction history</Link>
       </p>
 
-      <h3>Assign a patient</h3>
-      <p className="hint">
-        Enter a patient's account ID (ask the patient for their ID - there's
-        no patient search yet, this only takes a numeric ID).
-      </p>
-      <form onSubmit={handleAssign} className="form" style={{ flexDirection: "row", alignItems: "flex-end", gap: "0.5rem" }}>
-        <label style={{ flex: 1 }}>
-          Patient ID
-          <input
-            type="number"
-            value={assignId}
-            onChange={(e) => setAssignId(e.target.value)}
-            required
-          />
-        </label>
-        <button type="submit" disabled={assigning}>
-          {assigning ? "Assigning..." : "Assign"}
-        </button>
-      </form>
-      {assignMessage && <p className="success">{assignMessage}</p>}
-      {assignError && <p className="error">{assignError}</p>}
-
+      {/* Assigning patients is admin-only now - see AdminDashboard. */}
       <h3>Your patients</h3>
       {patients.length === 0 && <p>No patients assigned yet.</p>}
       {patients.map((p) => (

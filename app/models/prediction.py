@@ -24,3 +24,7 @@ class Prediction(Base):
     model_version = Column(String)     # e.g., v1.0
 
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Soft delete: NULL = active. Patients/doctors can soft-delete their
+    # own predictions; only admin can restore or permanently hard-delete.
+    deleted_at = Column(DateTime, nullable=True)

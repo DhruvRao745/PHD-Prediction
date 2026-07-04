@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { useNavigate, Link } from "react-router-dom";
 import { useAuth } from "../auth/AuthContext.jsx";
+import { getDashboardPath } from "../utils/roles.js";
 
 export default function Login() {
   const [username, setUsername] = useState("");
@@ -16,7 +17,7 @@ export default function Login() {
     setLoading(true);
     try {
       const me = await login(username, password);
-      navigate(me.role === "doctor" ? "/doctor" : "/patient");
+      navigate(getDashboardPath(me.role));
     } catch (err) {
       setError(err.message);
     } finally {

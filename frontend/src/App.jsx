@@ -10,6 +10,8 @@ import Predict from "./pages/Predict.jsx";
 import History from "./pages/History.jsx";
 import DoctorDashboard from "./pages/DoctorDashboard.jsx";
 import DoctorProfileForm from "./pages/DoctorProfileForm.jsx";
+import ChangePassword from "./pages/ChangePassword.jsx";
+import AdminDashboard from "./pages/AdminDashboard.jsx";
 import "./App.css";
 
 function NavBar() {
@@ -29,6 +31,8 @@ function NavBar() {
         {!user && <Link to="/register">Register</Link>}
         {user && user.role === "patient" && <Link to="/patient">Dashboard</Link>}
         {user && user.role === "doctor" && <Link to="/doctor">Dashboard</Link>}
+        {user && user.role === "admin" && <Link to="/admin">Dashboard</Link>}
+        {user && <Link to="/change-password">Change Password</Link>}
         {user && (
           <button type="button" className="link-button" onClick={handleLogout}>
             Logout ({user.username})
@@ -94,6 +98,22 @@ export default function App() {
               element={
                 <ProtectedRoute role="doctor">
                   <DoctorProfileForm />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/change-password"
+              element={
+                <ProtectedRoute>
+                  <ChangePassword />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/admin"
+              element={
+                <ProtectedRoute role="admin">
+                  <AdminDashboard />
                 </ProtectedRoute>
               }
             />

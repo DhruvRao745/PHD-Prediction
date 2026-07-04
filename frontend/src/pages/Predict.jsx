@@ -4,13 +4,14 @@ import { apiFetch } from "../api/client.js";
 import { useAuth } from "../auth/AuthContext.jsx";
 import PredictionForm from "../components/PredictionForm.jsx";
 import { DISEASES } from "../config/diseaseFields.js";
+import { getDashboardPath } from "../utils/roles.js";
 
 export default function Predict() {
   const { disease } = useParams();
   const config = DISEASES[disease];
   const { user } = useAuth();
   const isPatient = user?.role === "patient";
-  const dashboardPath = user?.role === "doctor" ? "/doctor" : "/patient";
+  const dashboardPath = getDashboardPath(user?.role);
 
   const [profile, setProfile] = useState(null);
   const [loading, setLoading] = useState(true);

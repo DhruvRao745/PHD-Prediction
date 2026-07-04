@@ -5,6 +5,7 @@ import sys
 from pathlib import Path
 from app.registry.model_registry import MODEL_REGISTRY
 from app.auth.routes import router as auth_router
+from app.admin.routes import router as admin_router
 from app.auth.security import get_current_user
 from app.database import SessionLocal
 from datetime import datetime
@@ -15,6 +16,7 @@ from app.models.patient_profile import PatientProfile
 from app.models.doctor_profile import DoctorProfile
 from app.models.doctor_patient import DoctorPatient
 from app.models.prediction import Prediction
+from app.models.reassignment_request import ReassignmentRequest
 from datetime import datetime, timedelta
 from sqlalchemy import and_
 
@@ -43,6 +45,7 @@ app.add_middleware(
 )
 
 app.include_router(auth_router)
+app.include_router(admin_router)
 
 
 class PredictRequest(BaseModel):
@@ -119,13 +122,15 @@ def get_history(
     db: Session = Depends(get_db)
 ):
     Predictions = db.query(Prediction).filter(
-        Prediction.patient_id == user["id"]
+        Prediction.patient_id == user["id"],
+        Prediction.deleted_at.is_(None)
     ).order_by(Prediction.created_at.desc()).limit(5).all()
 
     if disease:
         Predictions = db.query(Prediction).filter(
             Prediction.patient_id == user["id"],
-            Prediction.disease == disease
+            Prediction.disease == disease,
+            Prediction.deleted_at.is_(None)
         ).order_by(Prediction.created_at.desc()).limit(5).all()
 
     return Predictions
@@ -148,7 +153,8 @@ def patient_dashboard(
         raise HTTPException(404, "Patient profile not found")
 
     predictions = db.query(Prediction).filter(
-        Prediction.patient_id == patient.patient_id
+        Prediction.patient_id == patient.patient_id,
+        Prediction.deleted_at.is_(None)
     ).order_by(Prediction.created_at.desc()).limit(5).all()
 
     return {
@@ -175,8 +181,12 @@ def doctor_dashboard(
     if not doctor:
         raise HTTPException(404, "Doctor profile not found")
 
+    # Only active (non-unassigned) links - once admin unassigns a doctor
+    # from a patient, this soft-delete filter is what fully revokes the
+    # doctor's access to that patient's data, past and future.
     relations = db.query(DoctorPatient).filter(
-        DoctorPatient.doctor_id == doctor.doctor_id   # ✅ FIXED
+        DoctorPatient.doctor_id == doctor.doctor_id,
+        DoctorPatient.deleted_at.is_(None)
     ).all()
 
     patients_data = []
@@ -190,7 +200,8 @@ def doctor_dashboard(
             continue
 
         predictions = db.query(Prediction).filter(
-            Prediction.patient_id == patient.patient_id   # ✅ FIXED
+            Prediction.patient_id == patient.patient_id,
+            Prediction.deleted_at.is_(None)
         ).all()
 
         patients_data.append({
@@ -216,47 +227,84 @@ def doctor_dashboard(
     }
 
 
-# ------------------ ASSIGN PATIENT ------------------
-@app.post("/doctor/assign-patient")
-def assign_patient(
-    patient_id: int,
+# ------------------ DELETE (SOFT) OWN PREDICTION ------------------
+# Patients/doctors can remove their own predictions from their own view.
+# Patients are blocked entirely if they have an active assigned doctor -
+# only admin can remove that record in that case. Doctors can only ever
+# delete their own self-run predictions (never a patient's).
+@app.delete("/predictions/{prediction_id}")
+def delete_own_prediction(
+    prediction_id: int,
     user: dict = Depends(get_current_user),
     db: Session = Depends(get_db)
 ):
-    if user["role"] != "doctor":
-        raise HTTPException(403, "Only doctors allowed")
-
-    doctor = db.query(DoctorProfile).filter(
-        DoctorProfile.doctor_id == user["id"]
+    prediction = db.query(Prediction).filter(
+        Prediction.id == prediction_id,
+        Prediction.patient_id == user["id"],
+        Prediction.deleted_at.is_(None)
     ).first()
 
-    if not doctor:
-        raise HTTPException(404, "Doctor profile not found")
+    if not prediction:
+        raise HTTPException(404, "Prediction not found")
 
-    patient = db.query(PatientProfile).filter(
-        PatientProfile.patient_id == patient_id
-    ).first()
+    if user["role"] == "patient":
+        has_active_doctor = db.query(DoctorPatient).filter(
+            DoctorPatient.patient_id == user["id"],
+            DoctorPatient.deleted_at.is_(None)
+        ).first()
 
-    if not patient:
-        raise HTTPException(404, "Patient not found")
+        if has_active_doctor:
+            raise HTTPException(
+                403,
+                "You have an assigned doctor - only admin can remove this record"
+            )
 
-    existing = db.query(DoctorPatient).filter(
-        DoctorPatient.doctor_id == doctor.doctor_id,
-        DoctorPatient.patient_id == patient_id
-    ).first()
-
-    if existing:
-        return {"message": "Patient already assigned"}
-
-    relation = DoctorPatient(
-        doctor_id=doctor.doctor_id,
-        patient_id=patient_id
-    )
-
-    db.add(relation)
+    prediction.deleted_at = datetime.utcnow()
     db.commit()
 
-    return {"message": "Patient assigned successfully"}
+    return {"message": "Prediction deleted"}
+
+
+# ------------------ REQUEST DOCTOR REASSIGNMENT ------------------
+# Patients can't unassign their own doctor directly - only admin can.
+# This lets a patient flag "I want a different doctor" for admin to act on.
+class ReassignmentRequestData(BaseModel):
+    reason: str | None = None
+
+
+@app.post("/reassignment-request")
+def request_reassignment(
+    data: ReassignmentRequestData,
+    user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if user["role"] != "patient":
+        raise HTTPException(403, "Only patients can request reassignment")
+
+    existing_pending = db.query(ReassignmentRequest).filter(
+        ReassignmentRequest.patient_id == user["id"],
+        ReassignmentRequest.status == "pending"
+    ).first()
+
+    if existing_pending:
+        raise HTTPException(400, "You already have a pending reassignment request")
+
+    current_assignment = db.query(DoctorPatient).filter(
+        DoctorPatient.patient_id == user["id"],
+        DoctorPatient.deleted_at.is_(None)
+    ).first()
+
+    request_row = ReassignmentRequest(
+        patient_id=user["id"],
+        doctor_id=current_assignment.doctor_id if current_assignment else None,
+        reason=data.reason
+    )
+
+    db.add(request_row)
+    db.commit()
+
+    return {"message": "Reassignment request submitted"}
+
 
 # --------- Patient Profile API ---------
 @app.post("/profile/patient")

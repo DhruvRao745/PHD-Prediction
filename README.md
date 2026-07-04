@@ -60,7 +60,14 @@ Start PostgreSQL (Docker Desktop must be running):
 
 ```
 docker compose up -d   # or however your Postgres container is started
+
 python create_tables.py
+```
+
+To open a psql shell inside the Postgres container directly (useful for inspecting tables/columns):
+
+```
+docker exec -it health-postgres psql -U health_user -d health_db
 ```
 
 Run the API:
