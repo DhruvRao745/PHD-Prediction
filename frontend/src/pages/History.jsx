@@ -4,9 +4,13 @@ import { apiFetch } from "../api/client.js";
 import { useAuth } from "../auth/AuthContext.jsx";
 import { DISEASES } from "../config/diseaseFields.js";
 import { getDashboardPath } from "../utils/roles.js";
+import PredictionExplain from "../components/PredictionExplain.jsx";
+import EmptyState from "../components/EmptyState.jsx";
+import { useToast } from "../components/Toast.jsx";
 
 export default function History() {
   const { user } = useAuth();
+  const { showToast } = useToast();
   const dashboardPath = getDashboardPath(user?.role);
   const [disease, setDisease] = useState("");
   const [records, setRecords] = useState([]);
@@ -38,6 +42,7 @@ export default function History() {
     try {
       await apiFetch(`/predictions/${id}`, { method: "DELETE" });
       setRecords((prev) => prev.filter((r) => r.id !== id));
+      showToast("Prediction deleted");
     } catch (err) {
       setDeleteError(err.message);
     }
@@ -66,7 +71,9 @@ export default function History() {
       {error && <p className="error">{error}</p>}
       {deleteError && <p className="error">{deleteError}</p>}
 
-      {!loading && !error && records.length === 0 && <p>No predictions yet.</p>}
+      {!loading && !error && records.length === 0 && (
+        <EmptyState title="No predictions yet" hint="Nothing recorded for this filter." />
+      )}
 
       {!loading && records.length > 0 && (
         <table>
@@ -76,6 +83,7 @@ export default function History() {
               <th>Risk</th>
               <th>Confidence</th>
               <th>Date</th>
+              <th></th>
               <th></th>
             </tr>
           </thead>
@@ -90,6 +98,9 @@ export default function History() {
                   <button type="button" className="link-button" onClick={() => handleDelete(r.id)}>
                     Delete
                   </button>
+                </td>
+                <td>
+                  <PredictionExplain predictionId={r.id} explainable={r.input_data != null} />
                 </td>
               </tr>
             ))}

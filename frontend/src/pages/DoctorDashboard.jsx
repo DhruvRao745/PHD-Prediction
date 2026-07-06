@@ -1,9 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../api/client.js";
+import { useAuth } from "../auth/AuthContext.jsx";
 import { DISEASES } from "../config/diseaseFields.js";
+import Greeting from "../components/Greeting.jsx";
+import Avatar from "../components/Avatar.jsx";
+import EmptyState from "../components/EmptyState.jsx";
+import RiskTrend from "../components/RiskTrend.jsx";
 
 export default function DoctorDashboard() {
+  const { user } = useAuth();
   const [profile, setProfile] = useState(null);
   const [patients, setPatients] = useState([]);
   const [error, setError] = useState("");
@@ -29,9 +35,21 @@ export default function DoctorDashboard() {
 
   if (loading) return <div className="page">Loading...</div>;
 
+  const highRiskCount = patients.filter((p) => {
+    const latest = p.predictions[p.predictions.length - 1];
+    return latest?.risk === "High Risk";
+  }).length;
+
+  const summary =
+    patients.length === 0
+      ? "You don't have any patients assigned yet."
+      : highRiskCount > 0
+      ? `${highRiskCount} of your ${patients.length} assigned patient${patients.length === 1 ? "" : "s"} came back High Risk on their latest prediction.`
+      : `All ${patients.length} of your assigned patients are currently Low Risk on their latest prediction.`;
+
   return (
     <div className="page">
-      <h2>Doctor Dashboard</h2>
+      <Greeting name={profile?.name || user?.username} summary={summary} />
 
       {error && <p className="error">{error}</p>}
 
@@ -60,41 +78,62 @@ export default function DoctorDashboard() {
 
       {/* Assigning patients is admin-only now - see AdminDashboard.
           A patient can appear more than once here if you're assigned to
-          them for more than one disease - each assignment only shows
-          that one disease's data, not the patient's full history. */}
+          them for more than one disease - each row links to that specific
+          disease's detail page, not the patient's full cross-disease history. */}
       <h3>Your patients</h3>
-      {patients.length === 0 && <p>No patients assigned yet.</p>}
-      {patients.map((p) => (
-        <div className="card" key={`${p.patient_id}-${p.assigned_for}`}>
-          <h4>
-            {p.patient_name} (ID: {p.patient_id}), Age: {p.age ?? "—"} —
-            assigned for {DISEASES[p.assigned_for]?.label || p.assigned_for}
-          </h4>
-          {p.predictions.length === 0 && <p>No predictions yet.</p>}
-          {p.predictions.length > 0 && (
-            <table>
-              <thead>
-                <tr>
-                  <th>Disease</th>
-                  <th>Risk</th>
-                  <th>Confidence</th>
-                  <th>Date</th>
+      {patients.length === 0 && (
+        <EmptyState
+          title="No patients assigned yet"
+          hint="Once admin assigns a patient to you for a specific disease, they'll show up here."
+        />
+      )}
+      {patients.length > 0 && (
+        <table>
+          <thead>
+            <tr>
+              <th>Patient</th>
+              <th>Age</th>
+              <th>Disease</th>
+              <th>Latest risk</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {patients.map((p) => {
+              const latest = p.predictions[p.predictions.length - 1];
+              return (
+                <tr key={`${p.patient_id}-${p.assigned_for}`}>
+                  <td>
+                    <div className="person-row">
+                      <Avatar name={p.patient_name} size={28} />
+                      <span>{p.patient_name}</span>
+                    </div>
+                  </td>
+                  <td>{p.age ?? "—"}</td>
+                  <td>{DISEASES[p.assigned_for]?.label || p.assigned_for}</td>
+                  <td>
+                    {latest ? (
+                      <div style={{ display: "flex", flexDirection: "column", gap: "2px" }}>
+                        <span className={`status-chip ${latest.risk === "High Risk" ? "danger" : "success"}`}>
+                          {latest.risk}
+                        </span>
+                        <RiskTrend predictions={p.predictions} />
+                      </div>
+                    ) : (
+                      <span className="hint">No data</span>
+                    )}
+                  </td>
+                  <td>
+                    <Link className="link-button" to={`/doctor/patient/${p.patient_id}?disease=${p.assigned_for}`}>
+                      View details
+                    </Link>
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {p.predictions.map((pred, i) => (
-                  <tr key={i}>
-                    <td>{DISEASES[pred.disease]?.label || pred.disease}</td>
-                    <td>{pred.risk}</td>
-                    <td>{pred.confidence}</td>
-                    <td>{new Date(pred.time).toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          )}
-        </div>
-      ))}
+              );
+            })}
+          </tbody>
+        </table>
+      )}
     </div>
   );
 }

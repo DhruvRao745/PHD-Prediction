@@ -1,8 +1,15 @@
 import { useEffect, useState } from "react";
 import { apiFetch } from "../api/client.js";
 import { DISEASES } from "../config/diseaseFields.js";
+import { useAuth } from "../auth/AuthContext.jsx";
+import Greeting from "../components/Greeting.jsx";
+import Avatar from "../components/Avatar.jsx";
+import EmptyState from "../components/EmptyState.jsx";
+import { useToast } from "../components/Toast.jsx";
 
 export default function AdminDashboard() {
+  const { user } = useAuth();
+  const { showToast } = useToast();
   const [doctors, setDoctors] = useState([]);
   const [patients, setPatients] = useState([]);
   const [assignments, setAssignments] = useState([]);
@@ -13,8 +20,6 @@ export default function AdminDashboard() {
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [actionMessage, setActionMessage] = useState("");
-  const [actionError, setActionError] = useState("");
 
   const [assignDoctorId, setAssignDoctorId] = useState("");
   const [assignPatientId, setAssignPatientId] = useState("");
@@ -24,6 +29,8 @@ export default function AdminDashboard() {
   const [licenseDoctorId, setLicenseDoctorId] = useState("");
   const [licenseValue, setLicenseValue] = useState("");
   const [savingLicense, setSavingLicense] = useState(false);
+
+  const [activeSection, setActiveSection] = useState("overview");
 
   async function loadAll() {
     setLoading(true);
@@ -66,22 +73,18 @@ export default function AdminDashboard() {
 
   function flash(fn) {
     return async (...args) => {
-      setActionMessage("");
-      setActionError("");
       try {
         const res = await fn(...args);
-        if (res?.message) setActionMessage(res.message);
+        showToast(res?.message || "Done");
         await loadAll();
       } catch (err) {
-        setActionError(err.message);
+        showToast(err.message, "error");
       }
     };
   }
 
   async function handleAssign(e) {
     e.preventDefault();
-    setActionMessage("");
-    setActionError("");
     setAssigning(true);
     try {
       const res = await apiFetch("/admin/assign-patient", {
@@ -92,10 +95,10 @@ export default function AdminDashboard() {
           disease: assignDisease,
         },
       });
-      setActionMessage(res.message);
+      showToast(res.message);
       await loadAll();
     } catch (err) {
-      setActionError(err.message);
+      showToast(err.message, "error");
     } finally {
       setAssigning(false);
     }
@@ -158,19 +161,17 @@ export default function AdminDashboard() {
 
   async function handleCorrectLicense(e) {
     e.preventDefault();
-    setActionMessage("");
-    setActionError("");
     setSavingLicense(true);
     try {
       const res = await apiFetch(`/admin/doctors/${licenseDoctorId}/license`, {
         method: "PATCH",
         body: { license_no: licenseValue },
       });
-      setActionMessage(res.message);
+      showToast(res.message);
       setLicenseValue("");
       await loadAll();
     } catch (err) {
-      setActionError(err.message);
+      showToast(err.message, "error");
     } finally {
       setSavingLicense(false);
     }
@@ -178,14 +179,91 @@ export default function AdminDashboard() {
 
   if (loading) return <div className="page">Loading...</div>;
 
+  const pendingRequestCount = requests.length;
+  const pendingProfileCount = profileRequests.length;
+  const deletedCount = deletedAssignments.length + deletedPredictions.length;
+  const needsAttention = pendingRequestCount + pendingProfileCount;
+
+  const NAV_ITEMS = [
+    { id: "overview", label: "Overview" },
+    { id: "active", label: "Active assignments", count: assignments.length },
+    { id: "deleted", label: "Deleted / restore", count: deletedCount },
+    { id: "reassign", label: "Reassignment requests", badge: pendingRequestCount },
+    { id: "profile", label: "Profile requests", badge: pendingProfileCount },
+  ];
+
+  const summaryParts = [];
+  if (pendingRequestCount > 0) {
+    summaryParts.push(`${pendingRequestCount} reassignment request${pendingRequestCount === 1 ? "" : "s"}`);
+  }
+  if (pendingProfileCount > 0) {
+    summaryParts.push(`${pendingProfileCount} profile request${pendingProfileCount === 1 ? "" : "s"}`);
+  }
+  const summary =
+    summaryParts.length === 0
+      ? "Everything's caught up - no pending requests right now."
+      : `You have ${summaryParts.join(" and ")} waiting for review.`;
+
+  const QUICK_ACTIONS = [
+    { label: "Assign a patient", goto: "overview" },
+    { label: "Review reassignment requests", goto: "reassign" },
+    { label: "Review profile requests", goto: "profile" },
+    { label: "View active assignments", goto: "active" },
+    { label: "Deleted / restore", goto: "deleted" },
+  ];
+
   return (
-    <div className="page" style={{ maxWidth: 900 }}>
-      <h2>Admin Dashboard</h2>
+    <div className="page" style={{ maxWidth: 1000 }}>
+      <Greeting name={user?.username || "Admin"} summary={summary} />
 
       {error && <p className="error">{error}</p>}
-      {actionMessage && <p className="success">{actionMessage}</p>}
-      {actionError && <p className="error">{actionError}</p>}
 
+      <div className="quick-actions">
+        {QUICK_ACTIONS.map((qa) => (
+          <button key={qa.goto} type="button" onClick={() => setActiveSection(qa.goto)}>
+            {qa.label}
+          </button>
+        ))}
+      </div>
+
+      <div className="admin-shell">
+        <nav className="admin-sidebar">
+          {NAV_ITEMS.map((item) => (
+            <button
+              key={item.id}
+              type="button"
+              className={`admin-nav-item${activeSection === item.id ? " active" : ""}`}
+              onClick={() => setActiveSection(item.id)}
+            >
+              {item.label}
+              {!!item.badge && <span className="nav-badge">{item.badge}</span>}
+              {!item.badge && item.count != null && <span className="nav-count">{item.count}</span>}
+            </button>
+          ))}
+        </nav>
+
+        <div className="admin-content">
+          <div className="metrics-row">
+            <div className="metric-card">
+              <p className="metric-label">Doctors</p>
+              <p className="metric-value">{doctors.length}</p>
+            </div>
+            <div className="metric-card">
+              <p className="metric-label">Patients</p>
+              <p className="metric-value">{patients.length}</p>
+            </div>
+            <div className="metric-card">
+              <p className="metric-label">Active assignments</p>
+              <p className="metric-value">{assignments.length}</p>
+            </div>
+            <div className={`metric-card${needsAttention > 0 ? " warning" : ""}`}>
+              <p className="metric-label">Needs attention</p>
+              <p className="metric-value">{needsAttention}</p>
+            </div>
+          </div>
+
+          {activeSection === "overview" && (
+      <>
       <h3>Assign a patient to a doctor</h3>
       <form
         onSubmit={handleAssign}
@@ -198,7 +276,7 @@ export default function AdminDashboard() {
             <option value="">Select a doctor</option>
             {doctors.map((d) => (
               <option key={d.doctor_id} value={d.doctor_id}>
-                {d.name} (ID: {d.doctor_id})
+                {d.name}
               </option>
             ))}
           </select>
@@ -209,7 +287,7 @@ export default function AdminDashboard() {
             <option value="">Select a patient</option>
             {patients.map((p) => (
               <option key={p.patient_id} value={p.patient_id}>
-                {p.name} (ID: {p.patient_id})
+                {p.name}
               </option>
             ))}
           </select>
@@ -236,140 +314,6 @@ export default function AdminDashboard() {
         needed.
       </p>
 
-      <h3>Active assignments</h3>
-      {assignments.length === 0 && <p>No active assignments.</p>}
-      {assignments.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>Doctor</th>
-              <th>Patient</th>
-              <th>Disease</th>
-              <th>Assigned At</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {assignments.map((a) => (
-              <tr key={a.id}>
-                <td>{a.doctor_username} (ID: {a.doctor_id})</td>
-                <td>{a.patient_username} (ID: {a.patient_id})</td>
-                <td>{DISEASES[a.disease]?.label || a.disease}</td>
-                <td>{new Date(a.assigned_at).toLocaleString()}</td>
-                <td>
-                  <button
-                    type="button"
-                    className="link-button"
-                    onClick={() => handleUnassign(a.id)}
-                  >
-                    Unassign
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      <h3>Pending reassignment requests</h3>
-      {requests.length === 0 && <p>No pending requests.</p>}
-      {requests.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>Patient</th>
-              <th>Doctor</th>
-              <th>Disease</th>
-              <th>Reason</th>
-              <th>Requested At</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {requests.map((r) => (
-              <tr key={r.id}>
-                <td>{r.patient_username} (ID: {r.patient_id})</td>
-                <td>{r.doctor_username ? `${r.doctor_username} (ID: ${r.doctor_id})` : "—"}</td>
-                <td>{DISEASES[r.disease]?.label || r.disease}</td>
-                <td>{r.reason || "—"}</td>
-                <td>{new Date(r.created_at).toLocaleString()}</td>
-                <td>
-                  <button
-                    type="button"
-                    className="link-button"
-                    onClick={() => handleResolveRequest(r.id, "approved")}
-                  >
-                    Approve
-                  </button>{" "}
-                  <button
-                    type="button"
-                    className="link-button"
-                    onClick={() => handleResolveRequest(r.id, "denied")}
-                  >
-                    Deny
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
-      <h3>Pending profile change requests</h3>
-      <p className="hint">
-        Name (patient/doctor) and specialization/hospital (doctor) changes
-        land here for approval instead of being self-edited. Approving one
-        writes the requested value straight into their profile - except
-        "license_no" rows, which are just reports: approving/denying only
-        closes the ticket, it does NOT change the license number. Use the
-        "Correct a doctor's license number" form below to actually apply
-        that fix.
-      </p>
-      {profileRequests.length === 0 && <p>No pending requests.</p>}
-      {profileRequests.length > 0 && (
-        <table>
-          <thead>
-            <tr>
-              <th>User</th>
-              <th>Role</th>
-              <th>Field</th>
-              <th>Requested Value</th>
-              <th>Reason</th>
-              <th>Requested At</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            {profileRequests.map((r) => (
-              <tr key={r.id}>
-                <td>{r.username} (ID: {r.account_id})</td>
-                <td>{r.role}</td>
-                <td>{r.field}</td>
-                <td>{r.requested_value}</td>
-                <td>{r.reason || "—"}</td>
-                <td>{new Date(r.created_at).toLocaleString()}</td>
-                <td>
-                  <button
-                    type="button"
-                    className="link-button"
-                    onClick={() => handleResolveProfileRequest(r.id, "approved")}
-                  >
-                    Approve
-                  </button>{" "}
-                  <button
-                    type="button"
-                    className="link-button"
-                    onClick={() => handleResolveProfileRequest(r.id, "denied")}
-                  >
-                    Deny
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      )}
-
       <h3>Correct a doctor's license number</h3>
       <p className="hint">
         Doctors can only set their license number once and can never edit
@@ -386,7 +330,7 @@ export default function AdminDashboard() {
             <option value="">Select a doctor</option>
             {doctors.map((d) => (
               <option key={d.doctor_id} value={d.doctor_id}>
-                {d.name} (ID: {d.doctor_id})
+                {d.name}
               </option>
             ))}
           </select>
@@ -399,9 +343,186 @@ export default function AdminDashboard() {
           {savingLicense ? "Saving..." : "Save"}
         </button>
       </form>
+      </>
+          )}
 
+          {activeSection === "active" && (
+      <>
+      <h3>Active assignments</h3>
+      {assignments.length === 0 && (
+        <EmptyState
+          title="No active assignments"
+          hint="Assign a doctor to a patient above to get started."
+        />
+      )}
+      {assignments.length > 0 && (
+        <table>
+          <thead>
+            <tr>
+              <th>Doctor</th>
+              <th>Patient</th>
+              <th>Disease</th>
+              <th>Status</th>
+              <th>Assigned At</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {assignments.map((a) => (
+              <tr key={a.id}>
+                <td>
+                  <div className="person-row">
+                    <Avatar name={a.doctor_username} size={26} />
+                    <span>{a.doctor_username}</span>
+                  </div>
+                </td>
+                <td>
+                  <div className="person-row">
+                    <Avatar name={a.patient_username} size={26} />
+                    <span>{a.patient_username}</span>
+                  </div>
+                </td>
+                <td>{DISEASES[a.disease]?.label || a.disease}</td>
+                <td><span className="status-chip success">Active</span></td>
+                <td>{new Date(a.assigned_at).toLocaleString()}</td>
+                <td>
+                  <div className="row-actions">
+                    <button
+                      type="button"
+                      className="btn-sm danger"
+                      onClick={() => handleUnassign(a.id)}
+                    >
+                      Unassign
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      </>
+          )}
+
+          {activeSection === "reassign" && (
+      <>
+      <h3>Pending reassignment requests</h3>
+      {requests.length === 0 && (
+        <EmptyState title="No pending reassignment requests" hint="You're all caught up." />
+      )}
+      {requests.length > 0 && (
+        <table>
+          <thead>
+            <tr>
+              <th>Patient</th>
+              <th>Doctor</th>
+              <th>Disease</th>
+              <th>Reason</th>
+              <th>Requested At</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {requests.map((r) => (
+              <tr key={r.id}>
+                <td>{r.patient_username}</td>
+                <td>{r.doctor_username || "—"}</td>
+                <td>{DISEASES[r.disease]?.label || r.disease}</td>
+                <td>{r.reason || "—"}</td>
+                <td>{new Date(r.created_at).toLocaleString()}</td>
+                <td>
+                  <div className="row-actions">
+                    <button
+                      type="button"
+                      className="btn-sm success"
+                      onClick={() => handleResolveRequest(r.id, "approved")}
+                    >
+                      Approve
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-sm danger"
+                      onClick={() => handleResolveRequest(r.id, "denied")}
+                    >
+                      Deny
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      </>
+          )}
+
+          {activeSection === "profile" && (
+      <>
+      <h3>Pending profile change requests</h3>
+      <p className="hint">
+        Name (patient/doctor) and specialization/hospital (doctor) changes
+        land here for approval instead of being self-edited. Approving one
+        writes the requested value straight into their profile - except
+        "license_no" rows, which are just reports: approving/denying only
+        closes the ticket, it does NOT change the license number. Use the
+        "Correct a doctor's license number" form in the Overview section to
+        actually apply that fix.
+      </p>
+      {profileRequests.length === 0 && (
+        <EmptyState title="No pending profile requests" hint="You're all caught up." />
+      )}
+      {profileRequests.length > 0 && (
+        <table>
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Role</th>
+              <th>Field</th>
+              <th>Requested Value</th>
+              <th>Reason</th>
+              <th>Requested At</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {profileRequests.map((r) => (
+              <tr key={r.id}>
+                <td>{r.username}</td>
+                <td>{r.role}</td>
+                <td>{r.field}</td>
+                <td>{r.requested_value}</td>
+                <td>{r.reason || "—"}</td>
+                <td>{new Date(r.created_at).toLocaleString()}</td>
+                <td>
+                  <div className="row-actions">
+                    <button
+                      type="button"
+                      className="btn-sm success"
+                      onClick={() => handleResolveProfileRequest(r.id, "approved")}
+                    >
+                      Approve
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-sm danger"
+                      onClick={() => handleResolveProfileRequest(r.id, "denied")}
+                    >
+                      Deny
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      </>
+          )}
+
+          {activeSection === "deleted" && (
+      <>
       <h3>Soft-deleted assignments</h3>
-      {deletedAssignments.length === 0 && <p>None.</p>}
+      {deletedAssignments.length === 0 && <EmptyState title="Nothing here" hint="Unassigned doctor-patient links show up here for restore or permanent deletion." />}
       {deletedAssignments.length > 0 && (
         <table>
           <thead>
@@ -416,25 +537,27 @@ export default function AdminDashboard() {
           <tbody>
             {deletedAssignments.map((a) => (
               <tr key={a.id}>
-                <td>{a.doctor_username} (ID: {a.doctor_id})</td>
-                <td>{a.patient_username} (ID: {a.patient_id})</td>
+                <td>{a.doctor_username}</td>
+                <td>{a.patient_username}</td>
                 <td>{DISEASES[a.disease]?.label || a.disease}</td>
                 <td>{new Date(a.deleted_at).toLocaleString()}</td>
                 <td>
-                  <button
-                    type="button"
-                    className="link-button"
-                    onClick={() => handleRestoreAssignment(a.id)}
-                  >
-                    Restore
-                  </button>{" "}
-                  <button
-                    type="button"
-                    className="link-button"
-                    onClick={() => handlePurgeAssignment(a.id)}
-                  >
-                    Delete Forever
-                  </button>
+                  <div className="row-actions">
+                    <button
+                      type="button"
+                      className="btn-sm success"
+                      onClick={() => handleRestoreAssignment(a.id)}
+                    >
+                      Restore
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-sm danger"
+                      onClick={() => handlePurgeAssignment(a.id)}
+                    >
+                      Delete forever
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
@@ -443,7 +566,7 @@ export default function AdminDashboard() {
       )}
 
       <h3>Soft-deleted predictions</h3>
-      {deletedPredictions.length === 0 && <p>None.</p>}
+      {deletedPredictions.length === 0 && <EmptyState title="Nothing here" hint="Soft-deleted predictions show up here for restore or permanent deletion." />}
       {deletedPredictions.length > 0 && (
         <table>
           <thead>
@@ -459,32 +582,38 @@ export default function AdminDashboard() {
             {deletedPredictions.map((p) => (
               <tr key={p.id}>
                 <td>
-                  {p.account_username} (ID: {p.account_id}, {p.account_role})
+                  {p.account_username} ({p.account_role})
                 </td>
                 <td>{DISEASES[p.disease]?.label || p.disease}</td>
                 <td>{p.risk_level} ({p.probability})</td>
                 <td>{new Date(p.deleted_at).toLocaleString()}</td>
                 <td>
-                  <button
-                    type="button"
-                    className="link-button"
-                    onClick={() => handleRestorePrediction(p.id)}
-                  >
-                    Restore
-                  </button>{" "}
-                  <button
-                    type="button"
-                    className="link-button"
-                    onClick={() => handlePurgePrediction(p.id)}
-                  >
-                    Delete Forever
-                  </button>
+                  <div className="row-actions">
+                    <button
+                      type="button"
+                      className="btn-sm success"
+                      onClick={() => handleRestorePrediction(p.id)}
+                    >
+                      Restore
+                    </button>
+                    <button
+                      type="button"
+                      className="btn-sm danger"
+                      onClick={() => handlePurgePrediction(p.id)}
+                    >
+                      Delete forever
+                    </button>
+                  </div>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       )}
+      </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

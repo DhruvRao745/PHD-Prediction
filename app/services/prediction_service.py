@@ -9,6 +9,7 @@ def save_prediction(
     probability: float,
     input_method: str = "form",
     model_version: str = "v1.0",
+    input_data: dict | None = None,
 ):
     record = Prediction(
         account_id=account_id,
@@ -17,6 +18,7 @@ def save_prediction(
         probability=probability,
         input_method=input_method,
         model_version=model_version,
+        input_data=input_data,
     )
 
     db.add(record)

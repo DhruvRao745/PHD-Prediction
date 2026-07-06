@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, CheckConstraint
+from sqlalchemy import Column, Integer, String, Float, DateTime, ForeignKey, CheckConstraint, JSON
 from datetime import datetime
 from app.database import Base
 
@@ -31,6 +31,14 @@ class Prediction(Base):
     input_method = Column(String)      # form / questionnaire / upload
 
     model_version = Column(String)     # e.g., v1.0
+
+    # The raw feature values submitted for this prediction (age,
+    # cholesterol, glucose, etc. - whatever that disease's form
+    # collected). Nullable because predictions made before this column
+    # existed won't have it. Needed to explain a past prediction after
+    # the fact (SHAP needs the exact inputs, not just the result) and to
+    # plot real metric values over time, not just the risk label.
+    input_data = Column(JSON, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
 

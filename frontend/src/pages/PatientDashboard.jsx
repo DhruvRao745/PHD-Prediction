@@ -2,8 +2,14 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { apiFetch } from "../api/client.js";
 import { DISEASES } from "../config/diseaseFields.js";
+import PredictionExplain from "../components/PredictionExplain.jsx";
+import Greeting from "../components/Greeting.jsx";
+import Avatar from "../components/Avatar.jsx";
+import EmptyState from "../components/EmptyState.jsx";
+import { useToast } from "../components/Toast.jsx";
 
 export default function PatientDashboard() {
+  const { showToast } = useToast();
   const [profile, setProfile] = useState(null);
   const [predictions, setPredictions] = useState([]);
   const [error, setError] = useState("");
@@ -47,6 +53,7 @@ export default function PatientDashboard() {
     try {
       await apiFetch(`/predictions/${id}`, { method: "DELETE" });
       setPredictions((prev) => prev.filter((p) => p.id !== id));
+      showToast("Prediction deleted");
     } catch (err) {
       setDeleteError(err.message);
     }
@@ -81,9 +88,14 @@ export default function PatientDashboard() {
 
   if (loading) return <div className="page">Loading...</div>;
 
+  const summary =
+    myDoctors.length === 0
+      ? "You don't have any doctors assigned yet."
+      : `You have ${myDoctors.length} doctor${myDoctors.length === 1 ? "" : "s"} assigned across your conditions.`;
+
   return (
     <div className="page">
-      <h2>Patient Dashboard</h2>
+      <Greeting name={profile?.name} summary={summary} />
 
       {error && <p className="error">{error}</p>}
 
@@ -99,13 +111,21 @@ export default function PatientDashboard() {
       )}
 
       <h3>Your doctors</h3>
-      {myDoctors.length === 0 && <p>No doctors assigned yet.</p>}
+      {myDoctors.length === 0 && (
+        <EmptyState
+          title="No doctors assigned yet"
+          hint="Once admin assigns you a doctor for a condition, they'll show up here."
+        />
+      )}
       {myDoctors.length > 0 && (
         <ul>
           {myDoctors.map((d) => (
-            <li key={`${d.doctor_id}-${d.disease}`}>
-              {d.name} — {DISEASES[d.disease]?.label || d.disease}
-              {d.specialization ? ` (${d.specialization})` : ""}
+            <li key={`${d.doctor_id}-${d.disease}`} className="person-row">
+              <Avatar name={d.name} size={28} />
+              <span>
+                {d.name} — {DISEASES[d.disease]?.label || d.disease}
+                {d.specialization ? ` (${d.specialization})` : ""}
+              </span>
             </li>
           ))}
         </ul>
@@ -122,7 +142,12 @@ export default function PatientDashboard() {
 
       <h3>Recent predictions</h3>
       {deleteError && <p className="error">{deleteError}</p>}
-      {predictions.length === 0 && <p>No predictions yet.</p>}
+      {predictions.length === 0 && (
+        <EmptyState
+          title="No predictions yet"
+          hint="Run your first prediction below to see it show up here."
+        />
+      )}
       {predictions.length > 0 && (
         <ul>
           {predictions.map((p) => (
@@ -132,6 +157,7 @@ export default function PatientDashboard() {
               <button type="button" className="link-button" onClick={() => handleDelete(p.id)}>
                 Delete
               </button>
+              <PredictionExplain predictionId={p.id} explainable={p.input_data != null} />
             </li>
           ))}
         </ul>
@@ -193,7 +219,7 @@ export default function PatientDashboard() {
             <tbody>
               {reassignRequests.map((r) => (
                 <tr key={r.id}>
-                  <td>{r.doctor_name || `ID: ${r.doctor_id}`}</td>
+                  <td>{r.doctor_name || "Unknown doctor"}</td>
                   <td>{DISEASES[r.disease]?.label || r.disease}</td>
                   <td>{r.status}</td>
                   <td>{r.reason || "—"}</td>

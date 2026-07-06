@@ -11,6 +11,7 @@ from app.database import SessionLocal
 from datetime import datetime
 from app.deps import get_db
 from app.services.prediction_service import save_prediction
+from app.core.explainer import explain_prediction
 from sqlalchemy.orm import Session
 from app.models.patient_profile import PatientProfile
 from app.models.doctor_profile import DoctorProfile
@@ -107,7 +108,8 @@ def predict_api(
         risk_level=risk,
         probability=confidence,
         input_method="form",
-        model_version="v1.0"
+        model_version="v1.0",
+        input_data=request.data,
     )
 
     return {
@@ -136,6 +138,53 @@ def get_history(
         ).order_by(Prediction.created_at.desc()).limit(5).all()
 
     return Predictions
+
+
+# ------------------ PREDICTION EXPLANATION (SHAP) ------------------
+# Who can see why a specific prediction came out the way it did:
+#   - the account the prediction belongs to (patient or self-checking doctor)
+#   - a doctor with an active assignment for that patient + that disease
+#   - admin
+@app.get("/predictions/{prediction_id}/explain")
+def explain_prediction_endpoint(
+    prediction_id: int,
+    user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    prediction = db.query(Prediction).filter(Prediction.id == prediction_id).first()
+    if not prediction:
+        raise HTTPException(404, "Prediction not found")
+
+    is_owner = prediction.account_id == user["id"]
+    is_admin = user["role"] == "admin"
+
+    has_doctor_access = False
+    if user["role"] == "doctor" and not is_owner:
+        has_doctor_access = db.query(DoctorPatient).filter(
+            DoctorPatient.doctor_id == user["id"],
+            DoctorPatient.patient_id == prediction.account_id,
+            DoctorPatient.disease == prediction.disease,
+            DoctorPatient.deleted_at.is_(None)
+        ).first() is not None
+
+    if not (is_owner or is_admin or has_doctor_access):
+        raise HTTPException(403, "You don't have access to this prediction")
+
+    if prediction.deleted_at is not None and not is_admin:
+        raise HTTPException(404, "Prediction not found")
+
+    try:
+        contributions = explain_prediction(prediction.disease, prediction.input_data)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc))
+
+    return {
+        "prediction_id": prediction.id,
+        "disease": prediction.disease,
+        "risk_level": prediction.risk_level,
+        "probability": prediction.probability,
+        "contributions": contributions,
+    }
 
 
 # ------------------ PATIENT DASHBOARD ------------------
@@ -211,7 +260,7 @@ def doctor_dashboard(
             Prediction.account_id == patient.patient_id,
             Prediction.disease == rel.disease,
             Prediction.deleted_at.is_(None)
-        ).all()
+        ).order_by(Prediction.created_at.asc()).all()
 
         patients_data.append({
             "patient_id": patient.patient_id,
@@ -219,10 +268,12 @@ def doctor_dashboard(
             "age": patient.age,
             "assigned_for": rel.disease,
             "predictions": [{
+                "id": p.id,
                 "disease": p.disease,
                 "risk": p.risk_level,
                 "confidence": p.probability,
-                "time" : p.created_at
+                "time" : p.created_at,
+                "explainable": p.input_data is not None,
             }
                 for p in predictions
             ]
@@ -234,6 +285,61 @@ def doctor_dashboard(
             "doctor_profile": doctor,
             "patients": patients_data
         }
+    }
+
+
+# ------------------ DOCTOR: SINGLE PATIENT DETAIL ------------------
+# Backs the dedicated patient detail page (as opposed to the summary list
+# on /dashboard/doctor) - same access rule, scoped to one patient + one
+# disease so a direct link/refresh doesn't need any router state passed
+# in from the dashboard.
+@app.get("/doctor/patients/{patient_id}")
+def doctor_patient_detail(
+    patient_id: int,
+    disease: str,
+    user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if user["role"] != "doctor":
+        raise HTTPException(403, "Access denied")
+
+    relation = db.query(DoctorPatient).filter(
+        DoctorPatient.doctor_id == user["id"],
+        DoctorPatient.patient_id == patient_id,
+        DoctorPatient.disease == disease,
+        DoctorPatient.deleted_at.is_(None)
+    ).first()
+
+    if not relation:
+        raise HTTPException(403, "You're not assigned to this patient for this disease")
+
+    patient = db.query(PatientProfile).filter(
+        PatientProfile.patient_id == patient_id
+    ).first()
+
+    if not patient:
+        raise HTTPException(404, "Patient not found")
+
+    predictions = db.query(Prediction).filter(
+        Prediction.account_id == patient_id,
+        Prediction.disease == disease,
+        Prediction.deleted_at.is_(None)
+    ).order_by(Prediction.created_at.asc()).all()
+
+    return {
+        "patient_id": patient.patient_id,
+        "patient_name": patient.name,
+        "age": patient.age,
+        "gender": patient.gender,
+        "disease": disease,
+        "assigned_at": relation.assigned_at,
+        "predictions": [{
+            "id": p.id,
+            "risk": p.risk_level,
+            "confidence": p.probability,
+            "time": p.created_at,
+            "explainable": p.input_data is not None,
+        } for p in predictions],
     }
 
 

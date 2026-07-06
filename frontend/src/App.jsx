@@ -9,9 +9,11 @@ import PatientProfileForm from "./pages/PatientProfileForm.jsx";
 import Predict from "./pages/Predict.jsx";
 import History from "./pages/History.jsx";
 import DoctorDashboard from "./pages/DoctorDashboard.jsx";
+import DoctorPatientDetail from "./pages/DoctorPatientDetail.jsx";
 import DoctorProfileForm from "./pages/DoctorProfileForm.jsx";
 import ChangePassword from "./pages/ChangePassword.jsx";
 import AdminDashboard from "./pages/AdminDashboard.jsx";
+import ThemeToggle from "./components/ThemeToggle.jsx";
 import "./App.css";
 
 function NavBar() {
@@ -39,6 +41,7 @@ function NavBar() {
             Logout ({user.username})
           </button>
         )}
+        <ThemeToggle />
       </div>
     </nav>
   );
@@ -99,6 +102,14 @@ export default function App() {
               element={
                 <ProtectedRoute role="doctor">
                   <DoctorProfileForm />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/doctor/patient/:patientId"
+              element={
+                <ProtectedRoute role="doctor">
+                  <DoctorPatientDetail />
                 </ProtectedRoute>
               }
             />
