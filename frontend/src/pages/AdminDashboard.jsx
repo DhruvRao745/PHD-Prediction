@@ -18,6 +18,7 @@ export default function AdminDashboard() {
 
   const [assignDoctorId, setAssignDoctorId] = useState("");
   const [assignPatientId, setAssignPatientId] = useState("");
+  const [assignDisease, setAssignDisease] = useState("");
   const [assigning, setAssigning] = useState(false);
 
   const [licenseDoctorId, setLicenseDoctorId] = useState("");
@@ -88,6 +89,7 @@ export default function AdminDashboard() {
         body: {
           doctor_id: Number(assignDoctorId),
           patient_id: Number(assignPatientId),
+          disease: assignDisease,
         },
       });
       setActionMessage(res.message);
@@ -99,24 +101,37 @@ export default function AdminDashboard() {
     }
   }
 
-  const handleUnassign = flash((doctorId, patientId) =>
-    apiFetch(`/admin/unassign/${doctorId}/${patientId}`, { method: "DELETE" })
+  // Wraps a flash()-created handler with a confirmation prompt first -
+  // for actions that are destructive or hard/impossible to undo. If the
+  // user cancels, the request never fires.
+  function withConfirm(handler, message) {
+    return async (...args) => {
+      if (!window.confirm(message)) return;
+      await handler(...args);
+    };
+  }
+
+  const handleUnassign = withConfirm(
+    flash((id) => apiFetch(`/admin/unassign/${id}`, { method: "DELETE" })),
+    "Unassign this doctor from this patient?"
   );
 
-  const handleRestoreAssignment = flash((doctorId, patientId) =>
-    apiFetch(`/admin/assignments/${doctorId}/${patientId}/restore`, { method: "PATCH" })
+  const handleRestoreAssignment = flash((id) =>
+    apiFetch(`/admin/assignments/${id}/restore`, { method: "PATCH" })
   );
 
-  const handlePurgeAssignment = flash((doctorId, patientId) =>
-    apiFetch(`/admin/assignments/${doctorId}/${patientId}/permanent`, { method: "DELETE" })
+  const handlePurgeAssignment = withConfirm(
+    flash((id) => apiFetch(`/admin/assignments/${id}/permanent`, { method: "DELETE" })),
+    "Permanently delete this assignment? This cannot be undone."
   );
 
   const handleRestorePrediction = flash((id) =>
     apiFetch(`/admin/predictions/${id}/restore`, { method: "PATCH" })
   );
 
-  const handlePurgePrediction = flash((id) =>
-    apiFetch(`/admin/predictions/${id}/permanent`, { method: "DELETE" })
+  const handlePurgePrediction = withConfirm(
+    flash((id) => apiFetch(`/admin/predictions/${id}/permanent`, { method: "DELETE" })),
+    "Permanently delete this prediction? This cannot be undone."
   );
 
   // Denials always ask for a reason - the person on the other end has a
@@ -199,10 +214,27 @@ export default function AdminDashboard() {
             ))}
           </select>
         </label>
+        <label style={{ flex: 1 }}>
+          Disease
+          <select value={assignDisease} onChange={(e) => setAssignDisease(e.target.value)} required>
+            <option value="">Select a disease</option>
+            {Object.entries(DISEASES).map(([key, d]) => (
+              <option key={key} value={key}>
+                {d.label}
+              </option>
+            ))}
+          </select>
+        </label>
         <button type="submit" disabled={assigning}>
           {assigning ? "Assigning..." : "Assign"}
         </button>
       </form>
+      <p className="hint">
+        Each assignment is scoped to one disease - the doctor will only see
+        that patient's data for the disease picked here, not their full
+        history. Assign the same doctor again for a different disease if
+        needed.
+      </p>
 
       <h3>Active assignments</h3>
       {assignments.length === 0 && <p>No active assignments.</p>}
@@ -212,21 +244,23 @@ export default function AdminDashboard() {
             <tr>
               <th>Doctor</th>
               <th>Patient</th>
+              <th>Disease</th>
               <th>Assigned At</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {assignments.map((a) => (
-              <tr key={`${a.doctor_id}-${a.patient_id}`}>
+              <tr key={a.id}>
                 <td>{a.doctor_username} (ID: {a.doctor_id})</td>
                 <td>{a.patient_username} (ID: {a.patient_id})</td>
+                <td>{DISEASES[a.disease]?.label || a.disease}</td>
                 <td>{new Date(a.assigned_at).toLocaleString()}</td>
                 <td>
                   <button
                     type="button"
                     className="link-button"
-                    onClick={() => handleUnassign(a.doctor_id, a.patient_id)}
+                    onClick={() => handleUnassign(a.id)}
                   >
                     Unassign
                   </button>
@@ -244,7 +278,8 @@ export default function AdminDashboard() {
           <thead>
             <tr>
               <th>Patient</th>
-              <th>Current Doctor</th>
+              <th>Doctor</th>
+              <th>Disease</th>
               <th>Reason</th>
               <th>Requested At</th>
               <th></th>
@@ -255,6 +290,7 @@ export default function AdminDashboard() {
               <tr key={r.id}>
                 <td>{r.patient_username} (ID: {r.patient_id})</td>
                 <td>{r.doctor_username ? `${r.doctor_username} (ID: ${r.doctor_id})` : "—"}</td>
+                <td>{DISEASES[r.disease]?.label || r.disease}</td>
                 <td>{r.reason || "—"}</td>
                 <td>{new Date(r.created_at).toLocaleString()}</td>
                 <td>
@@ -372,28 +408,30 @@ export default function AdminDashboard() {
             <tr>
               <th>Doctor</th>
               <th>Patient</th>
+              <th>Disease</th>
               <th>Deleted At</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
             {deletedAssignments.map((a) => (
-              <tr key={`${a.doctor_id}-${a.patient_id}`}>
+              <tr key={a.id}>
                 <td>{a.doctor_username} (ID: {a.doctor_id})</td>
                 <td>{a.patient_username} (ID: {a.patient_id})</td>
+                <td>{DISEASES[a.disease]?.label || a.disease}</td>
                 <td>{new Date(a.deleted_at).toLocaleString()}</td>
                 <td>
                   <button
                     type="button"
                     className="link-button"
-                    onClick={() => handleRestoreAssignment(a.doctor_id, a.patient_id)}
+                    onClick={() => handleRestoreAssignment(a.id)}
                   >
                     Restore
                   </button>{" "}
                   <button
                     type="button"
                     className="link-button"
-                    onClick={() => handlePurgeAssignment(a.doctor_id, a.patient_id)}
+                    onClick={() => handlePurgeAssignment(a.id)}
                   >
                     Delete Forever
                   </button>
@@ -410,7 +448,7 @@ export default function AdminDashboard() {
         <table>
           <thead>
             <tr>
-              <th>Patient</th>
+              <th>Account</th>
               <th>Disease</th>
               <th>Risk</th>
               <th>Deleted At</th>
@@ -420,7 +458,9 @@ export default function AdminDashboard() {
           <tbody>
             {deletedPredictions.map((p) => (
               <tr key={p.id}>
-                <td>{p.patient_username} (ID: {p.patient_id})</td>
+                <td>
+                  {p.account_username} (ID: {p.account_id}, {p.account_role})
+                </td>
                 <td>{DISEASES[p.disease]?.label || p.disease}</td>
                 <td>{p.risk_level} ({p.probability})</td>
                 <td>{new Date(p.deleted_at).toLocaleString()}</td>

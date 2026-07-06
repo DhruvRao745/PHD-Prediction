@@ -58,13 +58,17 @@ export default function DoctorDashboard() {
         <Link to="/history">View your prediction history</Link>
       </p>
 
-      {/* Assigning patients is admin-only now - see AdminDashboard. */}
+      {/* Assigning patients is admin-only now - see AdminDashboard.
+          A patient can appear more than once here if you're assigned to
+          them for more than one disease - each assignment only shows
+          that one disease's data, not the patient's full history. */}
       <h3>Your patients</h3>
       {patients.length === 0 && <p>No patients assigned yet.</p>}
       {patients.map((p) => (
-        <div className="card" key={p.patient_id}>
+        <div className="card" key={`${p.patient_id}-${p.assigned_for}`}>
           <h4>
-            {p.patient_name} (ID: {p.patient_id}), Age: {p.age ?? "—"}
+            {p.patient_name} (ID: {p.patient_id}), Age: {p.age ?? "—"} —
+            assigned for {DISEASES[p.assigned_for]?.label || p.assigned_for}
           </h4>
           {p.predictions.length === 0 && <p>No predictions yet.</p>}
           {p.predictions.length > 0 && (

@@ -33,6 +33,7 @@ export default function History() {
   }, [disease]);
 
   async function handleDelete(id) {
+    if (!window.confirm("Delete this prediction? This can't be undone.")) return;
     setDeleteError("");
     try {
       await apiFetch(`/predictions/${id}`, { method: "DELETE" });

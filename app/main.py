@@ -20,6 +20,7 @@ from app.models.reassignment_request import ReassignmentRequest
 from app.models.profile_change_request import ProfileChangeRequest
 from datetime import datetime, timedelta
 from sqlalchemy import and_
+from sqlalchemy.exc import IntegrityError
 
 # Ensure project root is on sys.path
 project_root = str(Path(__file__).resolve().parent.parent)
@@ -81,7 +82,7 @@ def predict_api(
     
     # Check similar prediction (not exact float match)
     existing = db.query(Prediction).filter(
-        Prediction.patient_id == user["id"],
+        Prediction.account_id == user["id"],
         Prediction.disease == request.disease,
         Prediction.created_at >= one_hour_ago,
         and_(
@@ -101,7 +102,7 @@ def predict_api(
     # Save only if not duplicate
     save_prediction(
         db=db,
-        patient_id=user["id"],
+        account_id=user["id"],
         disease=request.disease,
         risk_level=risk,
         probability=confidence,
@@ -123,13 +124,13 @@ def get_history(
     db: Session = Depends(get_db)
 ):
     Predictions = db.query(Prediction).filter(
-        Prediction.patient_id == user["id"],
+        Prediction.account_id == user["id"],
         Prediction.deleted_at.is_(None)
     ).order_by(Prediction.created_at.desc()).limit(5).all()
 
     if disease:
         Predictions = db.query(Prediction).filter(
-            Prediction.patient_id == user["id"],
+            Prediction.account_id == user["id"],
             Prediction.disease == disease,
             Prediction.deleted_at.is_(None)
         ).order_by(Prediction.created_at.desc()).limit(5).all()
@@ -154,7 +155,7 @@ def patient_dashboard(
         raise HTTPException(404, "Patient profile not found")
 
     predictions = db.query(Prediction).filter(
-        Prediction.patient_id == patient.patient_id,
+        Prediction.account_id == patient.patient_id,
         Prediction.deleted_at.is_(None)
     ).order_by(Prediction.created_at.desc()).limit(5).all()
 
@@ -200,8 +201,15 @@ def doctor_dashboard(
         if not patient:
             continue
 
+        # Scoped to the specific disease this assignment is for - a
+        # doctor assigned only for "heart" doesn't see this patient's
+        # kidney/diabetes/parkinsons predictions. If the same doctor is
+        # separately assigned to this same patient for a second disease,
+        # that's a second row in `relations`, so this patient will show
+        # up again below as its own entry for that other disease.
         predictions = db.query(Prediction).filter(
-            Prediction.patient_id == patient.patient_id,
+            Prediction.account_id == patient.patient_id,
+            Prediction.disease == rel.disease,
             Prediction.deleted_at.is_(None)
         ).all()
 
@@ -209,6 +217,7 @@ def doctor_dashboard(
             "patient_id": patient.patient_id,
             "patient_name": patient.name,
             "age": patient.age,
+            "assigned_for": rel.disease,
             "predictions": [{
                 "disease": p.disease,
                 "risk": p.risk_level,
@@ -241,7 +250,7 @@ def delete_own_prediction(
 ):
     prediction = db.query(Prediction).filter(
         Prediction.id == prediction_id,
-        Prediction.patient_id == user["id"],
+        Prediction.account_id == user["id"],
         Prediction.deleted_at.is_(None)
     ).first()
 
@@ -249,15 +258,21 @@ def delete_own_prediction(
         raise HTTPException(404, "Prediction not found")
 
     if user["role"] == "patient":
-        has_active_doctor = db.query(DoctorPatient).filter(
+        # Scoped to THIS prediction's disease - a patient with a heart
+        # doctor but no kidney doctor should still be free to delete
+        # their own kidney predictions, since nobody's actually watching
+        # those. Only blocked if a doctor is specifically assigned for
+        # the disease this particular prediction is about.
+        has_active_doctor_for_disease = db.query(DoctorPatient).filter(
             DoctorPatient.patient_id == user["id"],
+            DoctorPatient.disease == prediction.disease,
             DoctorPatient.deleted_at.is_(None)
         ).first()
 
-        if has_active_doctor:
+        if has_active_doctor_for_disease:
             raise HTTPException(
                 403,
-                "You have an assigned doctor - only admin can remove this record"
+                "You have an assigned doctor for this disease - only admin can remove this record"
             )
 
     prediction.deleted_at = datetime.utcnow()
@@ -268,9 +283,47 @@ def delete_own_prediction(
 
 # ------------------ REQUEST DOCTOR REASSIGNMENT ------------------
 # Patients can't unassign their own doctor directly - only admin can.
-# This lets a patient flag "I want a different doctor" for admin to act on.
+# This lets a patient flag "I want to be removed from this specific
+# doctor, for this specific disease" for admin to act on. Both doctor_id
+# and disease are required - doctor_patient is scoped per disease, so
+# the same doctor could in theory be assigned to a patient for two
+# different diseases, and doctor_id alone wouldn't say which one the
+# patient means.
 class ReassignmentRequestData(BaseModel):
+    doctor_id: int
+    disease: str
     reason: str | None = None
+
+
+# So the frontend has something to populate the "which doctor" dropdown
+# with when a patient submits a reassignment request. A doctor can
+# appear more than once here if they're assigned for more than one
+# disease - each entry is really "this doctor, for this disease".
+@app.get("/my-doctors")
+def my_doctors(
+    user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if user["role"] != "patient":
+        raise HTTPException(403, "Only patients can view their assigned doctors")
+
+    relations = db.query(DoctorPatient).filter(
+        DoctorPatient.patient_id == user["id"],
+        DoctorPatient.deleted_at.is_(None)
+    ).all()
+
+    results = []
+    for r in relations:
+        doctor = db.query(DoctorProfile).filter(DoctorProfile.doctor_id == r.doctor_id).first()
+        if doctor:
+            results.append({
+                "doctor_id": doctor.doctor_id,
+                "name": doctor.name,
+                "specialization": doctor.specialization,
+                "hospital": doctor.hospital,
+                "disease": r.disease,
+            })
+    return results
 
 
 @app.post("/reassignment-request")
@@ -282,22 +335,37 @@ def request_reassignment(
     if user["role"] != "patient":
         raise HTTPException(403, "Only patients can request reassignment")
 
+    # Make sure this is actually one of the patient's current assignments
+    # - otherwise a patient could name any doctor_id/disease combo, real
+    # assignment or not.
+    active_assignment = db.query(DoctorPatient).filter(
+        DoctorPatient.doctor_id == data.doctor_id,
+        DoctorPatient.patient_id == user["id"],
+        DoctorPatient.disease == data.disease,
+        DoctorPatient.deleted_at.is_(None)
+    ).first()
+
+    if not active_assignment:
+        raise HTTPException(400, "This doctor is not currently assigned to you for this disease")
+
+    # Scoped to this specific (doctor, disease) now, not the patient
+    # overall - a patient with two doctors should be able to request
+    # reassignment away from one of them while keeping a separate
+    # pending request open against the other.
     existing_pending = db.query(ReassignmentRequest).filter(
         ReassignmentRequest.patient_id == user["id"],
+        ReassignmentRequest.doctor_id == data.doctor_id,
+        ReassignmentRequest.disease == data.disease,
         ReassignmentRequest.status == "pending"
     ).first()
 
     if existing_pending:
-        raise HTTPException(400, "You already have a pending reassignment request")
-
-    current_assignment = db.query(DoctorPatient).filter(
-        DoctorPatient.patient_id == user["id"],
-        DoctorPatient.deleted_at.is_(None)
-    ).first()
+        raise HTTPException(400, "You already have a pending request for this doctor/disease")
 
     request_row = ReassignmentRequest(
         patient_id=user["id"],
-        doctor_id=current_assignment.doctor_id if current_assignment else None,
+        doctor_id=data.doctor_id,
+        disease=data.disease,
         reason=data.reason
     )
 
@@ -317,9 +385,25 @@ def my_reassignment_requests(
     if user["role"] != "patient":
         raise HTTPException(403, "Only patients can view their reassignment requests")
 
-    return db.query(ReassignmentRequest).filter(
+    rows = db.query(ReassignmentRequest).filter(
         ReassignmentRequest.patient_id == user["id"]
     ).order_by(ReassignmentRequest.created_at.desc()).all()
+
+    results = []
+    for r in rows:
+        doctor = db.query(DoctorProfile).filter(DoctorProfile.doctor_id == r.doctor_id).first()
+        results.append({
+            "id": r.id,
+            "doctor_id": r.doctor_id,
+            "doctor_name": doctor.name if doctor else None,
+            "disease": r.disease,
+            "reason": r.reason,
+            "status": r.status,
+            "admin_note": r.admin_note,
+            "created_at": r.created_at,
+            "resolved_at": r.resolved_at,
+        })
+    return results
 
 
 # --------- Patient Profile API ---------
@@ -349,7 +433,17 @@ def get_patient_profile(
     if not profile:
         raise HTTPException(404, "Patient profile not found")
 
-    return profile
+    return {
+        "patient_id": profile.patient_id,
+        "name": profile.name,
+        "age": profile.age,
+        "gender": profile.gender,
+        "height_cm": profile.height_cm,
+        "weight_kg": profile.weight_kg,
+        "created_at": profile.created_at,
+        "username": user["username"],
+        "email": user["email"],
+    }
 
 
 @app.patch("/profile/patient")
@@ -404,7 +498,16 @@ def get_doctor_profile(
     if not profile:
         raise HTTPException(404, "Doctor profile not found")
 
-    return profile
+    return {
+        "doctor_id": profile.doctor_id,
+        "name": profile.name,
+        "specialization": profile.specialization,
+        "hospital": profile.hospital,
+        "license_no": profile.license_no,
+        "created_at": profile.created_at,
+        "username": user["username"],
+        "email": user["email"],
+    }
 
 
 @app.patch("/profile/doctor")
@@ -426,8 +529,28 @@ def update_doctor_profile(
     if data.license_no is not None:
         if profile.license_no:
             raise HTTPException(400, "License number is already set - contact admin to correct it")
+
+        # Check against every OTHER doctor's license_no before touching the
+        # DB - without this, two doctors submitting the same number both
+        # pass this function's own logic and only the second commit fails,
+        # as a raw unhandled IntegrityError (500) instead of a clean 400.
+        duplicate = db.query(DoctorProfile).filter(
+            DoctorProfile.license_no == data.license_no,
+            DoctorProfile.doctor_id != user["id"]
+        ).first()
+        if duplicate:
+            raise HTTPException(400, "This license number is already registered to another doctor")
+
         profile.license_no = data.license_no
-        db.commit()
+        try:
+            db.commit()
+        except IntegrityError:
+            # Belt-and-suspenders: covers the rare race where two requests
+            # pass the check above at almost the same instant. The DB's
+            # unique constraint is the real safety net; this just turns
+            # its failure into a normal error response instead of a crash.
+            db.rollback()
+            raise HTTPException(400, "This license number is already registered to another doctor")
 
     return {"message": "Profile updated"}
 

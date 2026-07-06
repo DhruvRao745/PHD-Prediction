@@ -45,7 +45,8 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
         return {
             "id": user.id,
             "role": user.role,
-            "username": user.username
+            "username": user.username,
+            "email": user.email
         }
 
     except JWTError:

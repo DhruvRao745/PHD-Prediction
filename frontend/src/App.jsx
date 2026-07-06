@@ -19,6 +19,7 @@ function NavBar() {
   const navigate = useNavigate();
 
   function handleLogout() {
+    if (!window.confirm("Log out of your account?")) return;
     logout();
     navigate("/");
   }

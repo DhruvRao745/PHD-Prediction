@@ -3,7 +3,7 @@ from app.models.prediction import Prediction
 
 def save_prediction(
     db,
-    patient_id: int,
+    account_id: int,
     disease: str,
     risk_level: str,
     probability: float,
@@ -11,7 +11,7 @@ def save_prediction(
     model_version: str = "v1.0",
 ):
     record = Prediction(
-        patient_id=patient_id,
+        account_id=account_id,
         disease=disease,
         risk_level=risk_level,
         probability=probability,

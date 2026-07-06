@@ -9,6 +9,8 @@ export default function PatientDashboard() {
   const [error, setError] = useState("");
   const [loading, setLoading] = useState(true);
   const [deleteError, setDeleteError] = useState("");
+  const [myDoctors, setMyDoctors] = useState([]);
+  const [reassignChoice, setReassignChoice] = useState(""); // "doctorId:disease"
   const [reassignReason, setReassignReason] = useState("");
   const [reassignMessage, setReassignMessage] = useState("");
   const [reassignError, setReassignError] = useState("");
@@ -19,13 +21,15 @@ export default function PatientDashboard() {
     setLoading(true);
     setError("");
     try {
-      const [res, requestsRes] = await Promise.all([
+      const [res, requestsRes, doctorsRes] = await Promise.all([
         apiFetch("/dashboard/patient"),
         apiFetch("/reassignment-requests"),
+        apiFetch("/my-doctors"),
       ]);
       setProfile(res.data.patient_profile);
       setPredictions(res.data.predictions || []);
       setReassignRequests(requestsRes || []);
+      setMyDoctors(doctorsRes || []);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -38,6 +42,7 @@ export default function PatientDashboard() {
   }, []);
 
   async function handleDelete(id) {
+    if (!window.confirm("Delete this prediction? This can't be undone.")) return;
     setDeleteError("");
     try {
       await apiFetch(`/predictions/${id}`, { method: "DELETE" });
@@ -53,12 +58,18 @@ export default function PatientDashboard() {
     setReassignError("");
     setRequestingReassign(true);
     try {
+      const [doctorId, disease] = reassignChoice.split(":");
       const res = await apiFetch("/reassignment-request", {
         method: "POST",
-        body: { reason: reassignReason || null },
+        body: {
+          doctor_id: Number(doctorId),
+          disease,
+          reason: reassignReason || null,
+        },
       });
       setReassignMessage(res.message);
       setReassignReason("");
+      setReassignChoice("");
       const requestsRes = await apiFetch("/reassignment-requests");
       setReassignRequests(requestsRes || []);
     } catch (err) {
@@ -85,6 +96,19 @@ export default function PatientDashboard() {
           </p>
           <Link to="/profile/patient">Edit profile</Link>
         </div>
+      )}
+
+      <h3>Your doctors</h3>
+      {myDoctors.length === 0 && <p>No doctors assigned yet.</p>}
+      {myDoctors.length > 0 && (
+        <ul>
+          {myDoctors.map((d) => (
+            <li key={`${d.doctor_id}-${d.disease}`}>
+              {d.name} — {DISEASES[d.disease]?.label || d.disease}
+              {d.specialization ? ` (${d.specialization})` : ""}
+            </li>
+          ))}
+        </ul>
       )}
 
       <h3>Run a prediction</h3>
@@ -116,12 +140,28 @@ export default function PatientDashboard() {
         <Link to="/history">View full history</Link>
       </p>
 
-      <h3>Not happy with your assigned doctor?</h3>
+      <h3>Not happy with one of your doctors?</h3>
       <p className="hint">
         You can't unassign a doctor yourself - submit a request and admin
-        will review it.
+        will review it. Pick which doctor/disease you want to be
+        reassigned away from - your other doctors, if any, aren't affected.
       </p>
       <form onSubmit={handleRequestReassignment} className="form">
+        <label>
+          Doctor
+          <select
+            value={reassignChoice}
+            onChange={(e) => setReassignChoice(e.target.value)}
+            required
+          >
+            <option value="">Select a doctor</option>
+            {myDoctors.map((d) => (
+              <option key={`${d.doctor_id}-${d.disease}`} value={`${d.doctor_id}:${d.disease}`}>
+                {d.name} — {DISEASES[d.disease]?.label || d.disease}
+              </option>
+            ))}
+          </select>
+        </label>
         <label>
           Reason (optional)
           <input
@@ -142,6 +182,8 @@ export default function PatientDashboard() {
           <table>
             <thead>
               <tr>
+                <th>Doctor</th>
+                <th>Disease</th>
                 <th>Status</th>
                 <th>Reason</th>
                 <th>Admin Note</th>
@@ -151,6 +193,8 @@ export default function PatientDashboard() {
             <tbody>
               {reassignRequests.map((r) => (
                 <tr key={r.id}>
+                  <td>{r.doctor_name || `ID: ${r.doctor_id}`}</td>
+                  <td>{DISEASES[r.disease]?.label || r.disease}</td>
                   <td>{r.status}</td>
                   <td>{r.reason || "—"}</td>
                   <td>{r.admin_note || "—"}</td>

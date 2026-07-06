@@ -7,6 +7,7 @@ import { apiFetch } from "../api/client.js";
 // "Request name change" section) that admin approves or denies.
 export default function PatientProfileForm() {
   const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
   const [age, setAge] = useState("");
   const [gender, setGender] = useState("male");
   const [heightCm, setHeightCm] = useState("");
@@ -34,6 +35,7 @@ export default function PatientProfileForm() {
         apiFetch("/profile/change-requests"),
       ]);
       setName(profile.name || "");
+      setEmail(profile.email || "");
       setAge(profile.age ?? "");
       setGender(profile.gender || "male");
       setHeightCm(profile.height_cm ?? "");
@@ -110,6 +112,9 @@ export default function PatientProfileForm() {
       <div className="card">
         <p>
           <strong>Name:</strong> {name}
+        </p>
+        <p>
+          <strong>Email:</strong> {email}
         </p>
         <p className="hint">
           Name changes need admin approval - use the form below to request one.

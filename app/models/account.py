@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime
+from sqlalchemy import Column, Integer, String, DateTime, CheckConstraint
 from datetime import datetime
 from app.database import Base
 
@@ -18,3 +18,10 @@ class Account(Base):
     # created directly via create_admin.py.
 
     created_at = Column(DateTime, default=datetime.utcnow)
+
+    # Database-level safety net - the app already validates this, but a
+    # CHECK constraint means a bad value can never sneak in even from a
+    # raw script or manual insert that bypasses the app entirely.
+    __table_args__ = (
+        CheckConstraint("role IN ('patient', 'doctor', 'admin')", name="ck_accounts_role"),
+    )

@@ -143,6 +143,7 @@ export default function DoctorProfileForm() {
 
       <div className="card">
         <p><strong>Name:</strong> {profile?.name}</p>
+        <p><strong>Email:</strong> {profile?.email}</p>
         <p><strong>Specialization:</strong> {profile?.specialization || "—"}</p>
         <p><strong>Hospital:</strong> {profile?.hospital || "—"}</p>
         <p className="hint">

@@ -13,6 +13,7 @@ from app.models.doctor_patient import DoctorPatient
 from app.models.prediction import Prediction
 from app.models.reassignment_request import ReassignmentRequest
 from app.models.profile_change_request import ProfileChangeRequest
+from app.registry.model_registry import MODEL_REGISTRY
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -52,10 +53,15 @@ def list_patients(admin: dict = Depends(get_current_admin), db: Session = Depend
 # ------------------ ASSIGN / UNASSIGN ------------------
 # Only admin can do this now - doctors lost their self-service
 # assign-patient endpoint (removed from main.py).
+# Each assignment is scoped to ONE disease - a doctor assigned for
+# "heart" only ever sees that patient's heart data, not their full
+# history. See doctor_dashboard() in main.py for the query that enforces
+# this on the read side.
 
 class AssignPatientData(BaseModel):
     doctor_id: int
     patient_id: int
+    disease: str
 
 
 @router.post("/assign-patient")
@@ -64,6 +70,9 @@ def assign_patient(
     admin: dict = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
+    if data.disease not in MODEL_REGISTRY:
+        raise HTTPException(400, f"Unknown disease '{data.disease}'")
+
     doctor = db.query(Account).filter(Account.id == data.doctor_id, Account.role == "doctor").first()
     if not doctor:
         raise HTTPException(404, "Doctor not found")
@@ -72,38 +81,40 @@ def assign_patient(
     if not patient:
         raise HTTPException(404, "Patient not found")
 
-    existing = db.query(DoctorPatient).filter(
+    existing_active = db.query(DoctorPatient).filter(
         DoctorPatient.doctor_id == data.doctor_id,
         DoctorPatient.patient_id == data.patient_id,
+        DoctorPatient.disease == data.disease,
+        DoctorPatient.deleted_at.is_(None),
     ).first()
 
-    if existing:
-        if existing.deleted_at is None:
-            return {"message": "Patient already assigned to this doctor"}
-        # Was previously unassigned - reactivate rather than insert a
-        # duplicate row (doctor_id+patient_id is the composite PK).
-        existing.deleted_at = None
-        existing.assigned_at = datetime.utcnow()
-        db.commit()
-        return {"message": "Patient reassigned to doctor"}
+    if existing_active:
+        return {"message": "Patient already assigned to this doctor for this disease"}
 
-    relation = DoctorPatient(doctor_id=data.doctor_id, patient_id=data.patient_id)
+    # Always insert a fresh row - doctor_patient now has its own surrogate
+    # id, so old soft-deleted links for this same pair (if any) just stay
+    # in the table as history instead of being overwritten/reactivated.
+    # The partial unique index only blocks a second ACTIVE row for the
+    # same (doctor, patient, disease), so this can't create a duplicate.
+    relation = DoctorPatient(
+        doctor_id=data.doctor_id,
+        patient_id=data.patient_id,
+        disease=data.disease,
+    )
     db.add(relation)
     db.commit()
 
     return {"message": "Patient assigned successfully"}
 
 
-@router.delete("/unassign/{doctor_id}/{patient_id}")
+@router.delete("/unassign/{assignment_id}")
 def unassign_patient(
-    doctor_id: int,
-    patient_id: int,
+    assignment_id: int,
     admin: dict = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
     relation = db.query(DoctorPatient).filter(
-        DoctorPatient.doctor_id == doctor_id,
-        DoctorPatient.patient_id == patient_id,
+        DoctorPatient.id == assignment_id,
         DoctorPatient.deleted_at.is_(None),
     ).first()
 
@@ -126,50 +137,70 @@ def list_active_assignments(admin: dict = Depends(get_current_admin), db: Sessio
         doctor = db.query(Account).filter(Account.id == r.doctor_id).first()
         patient = db.query(Account).filter(Account.id == r.patient_id).first()
         results.append({
+            "id": r.id,
             "doctor_id": r.doctor_id,
             "doctor_username": doctor.username if doctor else None,
             "patient_id": r.patient_id,
             "patient_username": patient.username if patient else None,
+            "disease": r.disease,
             "assigned_at": r.assigned_at,
         })
     return results
 
 
 # ------------------ DELETED ASSIGNMENTS: LIST / RESTORE / PURGE ------------------
+# These act on the row's own `id` now, not doctor_id+patient_id - since
+# the same pair can be linked/unlinked more than once over time, that
+# pair alone is no longer enough to point at one specific row.
 
 @router.get("/assignments/deleted")
 def list_deleted_assignments(admin: dict = Depends(get_current_admin), db: Session = Depends(get_db)):
-    rows = db.query(DoctorPatient).filter(DoctorPatient.deleted_at.isnot(None)).all()
+    rows = db.query(DoctorPatient).filter(DoctorPatient.deleted_at.isnot(None)).order_by(
+        DoctorPatient.deleted_at.desc()
+    ).all()
     results = []
     for r in rows:
         doctor = db.query(Account).filter(Account.id == r.doctor_id).first()
         patient = db.query(Account).filter(Account.id == r.patient_id).first()
         results.append({
+            "id": r.id,
             "doctor_id": r.doctor_id,
             "doctor_username": doctor.username if doctor else None,
             "patient_id": r.patient_id,
             "patient_username": patient.username if patient else None,
+            "disease": r.disease,
             "assigned_at": r.assigned_at,
             "deleted_at": r.deleted_at,
         })
     return results
 
 
-@router.patch("/assignments/{doctor_id}/{patient_id}/restore")
+@router.patch("/assignments/{assignment_id}/restore")
 def restore_assignment(
-    doctor_id: int,
-    patient_id: int,
+    assignment_id: int,
     admin: dict = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
     relation = db.query(DoctorPatient).filter(
-        DoctorPatient.doctor_id == doctor_id,
-        DoctorPatient.patient_id == patient_id,
+        DoctorPatient.id == assignment_id,
         DoctorPatient.deleted_at.isnot(None),
     ).first()
 
     if not relation:
         raise HTTPException(404, "Deleted assignment not found")
+
+    # Restoring this one could collide with the one-active-link rule if
+    # the same (doctor, patient, disease) already got a different active
+    # row in the meantime - guard against that instead of letting the
+    # database reject it with a raw constraint error.
+    already_active = db.query(DoctorPatient).filter(
+        DoctorPatient.doctor_id == relation.doctor_id,
+        DoctorPatient.patient_id == relation.patient_id,
+        DoctorPatient.disease == relation.disease,
+        DoctorPatient.deleted_at.is_(None),
+    ).first()
+    if already_active:
+        raise HTTPException(400, "This doctor is already actively assigned to this patient for this disease")
 
     relation.deleted_at = None
     db.commit()
@@ -177,17 +208,13 @@ def restore_assignment(
     return {"message": "Assignment restored"}
 
 
-@router.delete("/assignments/{doctor_id}/{patient_id}/permanent")
+@router.delete("/assignments/{assignment_id}/permanent")
 def purge_assignment(
-    doctor_id: int,
-    patient_id: int,
+    assignment_id: int,
     admin: dict = Depends(get_current_admin),
     db: Session = Depends(get_db),
 ):
-    relation = db.query(DoctorPatient).filter(
-        DoctorPatient.doctor_id == doctor_id,
-        DoctorPatient.patient_id == patient_id,
-    ).first()
+    relation = db.query(DoctorPatient).filter(DoctorPatient.id == assignment_id).first()
 
     if not relation:
         raise HTTPException(404, "Assignment not found")
@@ -205,11 +232,14 @@ def list_deleted_predictions(admin: dict = Depends(get_current_admin), db: Sessi
     rows = db.query(Prediction).filter(Prediction.deleted_at.isnot(None)).all()
     results = []
     for p in rows:
-        patient = db.query(Account).filter(Account.id == p.patient_id).first()
+        # account here can be a patient OR a doctor (self-predictions) -
+        # named generically since this table isn't patient-only anymore.
+        account = db.query(Account).filter(Account.id == p.account_id).first()
         results.append({
             "id": p.id,
-            "patient_id": p.patient_id,
-            "patient_username": patient.username if patient else None,
+            "account_id": p.account_id,
+            "account_username": account.username if account else None,
+            "account_role": account.role if account else None,
             "disease": p.disease,
             "risk_level": p.risk_level,
             "probability": p.probability,
@@ -282,6 +312,7 @@ def list_reassignment_requests(
             "patient_username": patient.username if patient else None,
             "doctor_id": r.doctor_id,
             "doctor_username": doctor.username if doctor else None,
+            "disease": r.disease,
             "reason": r.reason,
             "status": r.status,
             "admin_note": r.admin_note,
@@ -316,10 +347,15 @@ def resolve_reassignment_request(
     if req.status != "pending":
         raise HTTPException(400, f"Request already {req.status}")
 
-    if data.status == "approved" and req.doctor_id is not None:
+    # doctor_id + disease together identify exactly one assignment now,
+    # so this only ever unassigns that one - a patient with more than one
+    # active doctor (or the same doctor for a different disease) keeps
+    # the others untouched.
+    if data.status == "approved":
         relation = db.query(DoctorPatient).filter(
             DoctorPatient.doctor_id == req.doctor_id,
             DoctorPatient.patient_id == req.patient_id,
+            DoctorPatient.disease == req.disease,
             DoctorPatient.deleted_at.is_(None),
         ).first()
         if relation:
