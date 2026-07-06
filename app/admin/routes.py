@@ -13,7 +13,10 @@ from app.models.doctor_patient import DoctorPatient
 from app.models.prediction import Prediction
 from app.models.reassignment_request import ReassignmentRequest
 from app.models.profile_change_request import ProfileChangeRequest
+from app.models.activity_log import ActivityLog
 from app.registry.model_registry import MODEL_REGISTRY
+from app.services.activity_log_service import log_activity
+from app.services.prediction_service import get_risk_summary
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -48,6 +51,28 @@ def list_patients(admin: dict = Depends(get_current_admin), db: Session = Depend
         }
         for p in patients
     ]
+
+
+# ------------------ CROSS-DISEASE RISK SUMMARY (ADMIN) ------------------
+# Admin-side equivalent of GET /risk-summary - same underlying helper,
+# just allowed to look up any patient by id instead of only "yourself".
+# Doctors deliberately don't get an equivalent of this at all (see
+# doctor_dashboard() in main.py) - they stay scoped to one disease.
+@router.get("/patients/{patient_id}/risk-summary")
+def patient_risk_summary(
+    patient_id: int,
+    admin: dict = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    patient = db.query(PatientProfile).filter(PatientProfile.patient_id == patient_id).first()
+    if not patient:
+        raise HTTPException(404, "Patient not found")
+
+    return {
+        "patient_id": patient.patient_id,
+        "patient_name": patient.name,
+        "summary": get_risk_summary(db, patient_id),
+    }
 
 
 # ------------------ ASSIGN / UNASSIGN ------------------
@@ -102,6 +127,13 @@ def assign_patient(
         disease=data.disease,
     )
     db.add(relation)
+    db.flush()  # populates relation.id without committing yet
+
+    log_activity(
+        db, admin, "assign_patient",
+        f"Assigned Dr. {doctor.username} to patient {patient.username} for {data.disease}",
+        target_type="doctor_patient", target_id=relation.id,
+    )
     db.commit()
 
     return {"message": "Patient assigned successfully"}
@@ -122,6 +154,15 @@ def unassign_patient(
         raise HTTPException(404, "Active assignment not found")
 
     relation.deleted_at = datetime.utcnow()
+
+    doctor = db.query(Account).filter(Account.id == relation.doctor_id).first()
+    patient = db.query(Account).filter(Account.id == relation.patient_id).first()
+    log_activity(
+        db, admin, "unassign_patient",
+        f"Unassigned Dr. {doctor.username if doctor else relation.doctor_id} from patient "
+        f"{patient.username if patient else relation.patient_id} ({relation.disease})",
+        target_type="doctor_patient", target_id=relation.id,
+    )
     db.commit()
 
     return {"message": "Patient unassigned"}
@@ -203,6 +244,15 @@ def restore_assignment(
         raise HTTPException(400, "This doctor is already actively assigned to this patient for this disease")
 
     relation.deleted_at = None
+
+    doctor = db.query(Account).filter(Account.id == relation.doctor_id).first()
+    patient = db.query(Account).filter(Account.id == relation.patient_id).first()
+    log_activity(
+        db, admin, "restore_assignment",
+        f"Restored assignment: Dr. {doctor.username if doctor else relation.doctor_id} - "
+        f"patient {patient.username if patient else relation.patient_id} ({relation.disease})",
+        target_type="doctor_patient", target_id=relation.id,
+    )
     db.commit()
 
     return {"message": "Assignment restored"}
@@ -218,6 +268,17 @@ def purge_assignment(
 
     if not relation:
         raise HTTPException(404, "Assignment not found")
+
+    doctor = db.query(Account).filter(Account.id == relation.doctor_id).first()
+    patient = db.query(Account).filter(Account.id == relation.patient_id).first()
+    # Logged before the delete - this row is about to be gone for good,
+    # so the log is the only place this record of it survives.
+    log_activity(
+        db, admin, "purge_assignment",
+        f"Permanently deleted assignment: Dr. {doctor.username if doctor else relation.doctor_id} - "
+        f"patient {patient.username if patient else relation.patient_id} ({relation.disease})",
+        target_type="doctor_patient", target_id=relation.id,
+    )
 
     db.delete(relation)
     db.commit()
@@ -264,6 +325,13 @@ def restore_prediction(
         raise HTTPException(404, "Deleted prediction not found")
 
     prediction.deleted_at = None
+
+    account = db.query(Account).filter(Account.id == prediction.account_id).first()
+    log_activity(
+        db, admin, "restore_prediction",
+        f"Restored {prediction.disease} prediction for {account.username if account else prediction.account_id}",
+        target_type="prediction", target_id=prediction.id,
+    )
     db.commit()
 
     return {"message": "Prediction restored"}
@@ -279,6 +347,14 @@ def purge_prediction(
 
     if not prediction:
         raise HTTPException(404, "Prediction not found")
+
+    account = db.query(Account).filter(Account.id == prediction.account_id).first()
+    log_activity(
+        db, admin, "purge_prediction",
+        f"Permanently deleted {prediction.disease} prediction for "
+        f"{account.username if account else prediction.account_id}",
+        target_type="prediction", target_id=prediction.id,
+    )
 
     db.delete(prediction)
     db.commit()
@@ -364,6 +440,16 @@ def resolve_reassignment_request(
     req.status = data.status
     req.admin_note = data.note
     req.resolved_at = datetime.utcnow()
+
+    patient = db.query(Account).filter(Account.id == req.patient_id).first()
+    doctor = db.query(Account).filter(Account.id == req.doctor_id).first() if req.doctor_id else None
+    log_activity(
+        db, admin, "resolve_reassignment_request",
+        f"{data.status.capitalize()} reassignment request from patient "
+        f"{patient.username if patient else req.patient_id} away from "
+        f"Dr. {doctor.username if doctor else req.doctor_id} ({req.disease})",
+        target_type="reassignment_request", target_id=req.id,
+    )
     db.commit()
 
     return {"message": f"Request {data.status}"}
@@ -444,6 +530,14 @@ def resolve_profile_change_request(
     req.status = data.status
     req.admin_note = data.note
     req.resolved_at = datetime.utcnow()
+
+    account = db.query(Account).filter(Account.id == req.account_id).first()
+    log_activity(
+        db, admin, "resolve_profile_change_request",
+        f"{data.status.capitalize()} {account.username if account else req.account_id}'s request to change "
+        f"{req.field} to '{req.requested_value}'",
+        target_type="profile_change_request", target_id=req.id,
+    )
     db.commit()
 
     return {"message": f"Request {data.status}"}
@@ -467,7 +561,50 @@ def correct_doctor_license(
     if not profile:
         raise HTTPException(404, "Doctor profile not found")
 
+    old_value = profile.license_no
     profile.license_no = data.license_no
+
+    log_activity(
+        db, admin, "correct_license",
+        f"Corrected Dr. {profile.name}'s license number from "
+        f"'{old_value or '(unset)'}' to '{data.license_no}'",
+        target_type="doctor_profile", target_id=doctor_id,
+    )
     db.commit()
 
     return {"message": "License number corrected"}
+
+
+# ------------------ ACTIVITY LOG ------------------
+# Read-only, admin-only view of every logged action, newest first.
+# `action` filters to one action type (e.g. "purge_prediction"); `actor_role`
+# filters to who did it. Both optional and combinable. Capped at 200 rows
+# per request - this is a browsing view, not a full export.
+@router.get("/activity-log")
+def list_activity_log(
+    action: str | None = None,
+    actor_role: str | None = None,
+    admin: dict = Depends(get_current_admin),
+    db: Session = Depends(get_db),
+):
+    query = db.query(ActivityLog)
+    if action:
+        query = query.filter(ActivityLog.action == action)
+    if actor_role:
+        query = query.filter(ActivityLog.actor_role == actor_role)
+
+    rows = query.order_by(ActivityLog.created_at.desc()).limit(200).all()
+
+    return [
+        {
+            "id": r.id,
+            "actor_username": r.actor_username,
+            "actor_role": r.actor_role,
+            "action": r.action,
+            "description": r.description,
+            "target_type": r.target_type,
+            "target_id": r.target_id,
+            "created_at": r.created_at,
+        }
+        for r in rows
+    ]

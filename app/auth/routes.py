@@ -8,6 +8,7 @@ from fastapi.security import OAuth2PasswordRequestForm
 from fastapi import Depends
 from app.models.patient_profile import PatientProfile
 from app.models.doctor_profile import DoctorProfile
+from app.services.activity_log_service import log_activity
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -65,6 +66,14 @@ def register(user: RegisterData, db: Session = Depends(get_db)):
         )
 
     db.add(profile)
+
+    # The actor here is the account that just registered itself - there's
+    # no separate "admin created this" actor for self-service signup.
+    log_activity(
+        db, {"id": new_user.id, "username": new_user.username, "role": new_user.role},
+        "register", f"{new_user.username} registered as a {user.role}",
+        target_type="account", target_id=new_user.id,
+    )
     db.commit()
 
     return {"message": f"{user.role} registered successfully"}
@@ -118,6 +127,11 @@ def change_password(
     #     raise HTTPException(400, "New password must be at least 6 characters")
 
     account.password_hash = hash_password(data.new_password)
+
+    log_activity(
+        db, user, "change_password", f"{user['username']} changed their password",
+        target_type="account", target_id=user["id"],
+    )
     db.commit()
 
     return {"message": "Password changed successfully"}

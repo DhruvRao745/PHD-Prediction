@@ -27,6 +27,7 @@ from app.models.doctor_patient import DoctorPatient
 from app.models.prediction import Prediction
 from app.models.reassignment_request import ReassignmentRequest
 from app.models.profile_change_request import ProfileChangeRequest
+from app.models.activity_log import ActivityLog
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

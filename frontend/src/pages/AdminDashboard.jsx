@@ -17,6 +17,7 @@ export default function AdminDashboard() {
   const [deletedPredictions, setDeletedPredictions] = useState([]);
   const [requests, setRequests] = useState([]);
   const [profileRequests, setProfileRequests] = useState([]);
+  const [activityLog, setActivityLog] = useState([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -29,6 +30,11 @@ export default function AdminDashboard() {
   const [licenseDoctorId, setLicenseDoctorId] = useState("");
   const [licenseValue, setLicenseValue] = useState("");
   const [savingLicense, setSavingLicense] = useState(false);
+
+  const [riskPatientId, setRiskPatientId] = useState("");
+  const [riskSummary, setRiskSummary] = useState(null);
+  const [loadingRiskSummary, setLoadingRiskSummary] = useState(false);
+  const [riskSummaryError, setRiskSummaryError] = useState("");
 
   const [activeSection, setActiveSection] = useState("overview");
 
@@ -44,6 +50,7 @@ export default function AdminDashboard() {
         deletedPredRes,
         requestsRes,
         profileRequestsRes,
+        activityLogRes,
       ] = await Promise.all([
         apiFetch("/admin/doctors"),
         apiFetch("/admin/patients"),
@@ -52,6 +59,7 @@ export default function AdminDashboard() {
         apiFetch("/admin/predictions/deleted"),
         apiFetch("/admin/reassignment-requests"),
         apiFetch("/admin/profile-change-requests"),
+        apiFetch("/admin/activity-log"),
       ]);
       setDoctors(doctorsRes);
       setPatients(patientsRes);
@@ -60,6 +68,7 @@ export default function AdminDashboard() {
       setDeletedPredictions(deletedPredRes);
       setRequests(requestsRes);
       setProfileRequests(profileRequestsRes);
+      setActivityLog(activityLogRes);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -177,6 +186,22 @@ export default function AdminDashboard() {
     }
   }
 
+  async function handleLoadRiskSummary(patientId) {
+    setRiskPatientId(patientId);
+    setRiskSummary(null);
+    setRiskSummaryError("");
+    if (!patientId) return;
+    setLoadingRiskSummary(true);
+    try {
+      const res = await apiFetch(`/admin/patients/${patientId}/risk-summary`);
+      setRiskSummary(res);
+    } catch (err) {
+      setRiskSummaryError(err.message);
+    } finally {
+      setLoadingRiskSummary(false);
+    }
+  }
+
   if (loading) return <div className="page">Loading...</div>;
 
   const pendingRequestCount = requests.length;
@@ -190,6 +215,8 @@ export default function AdminDashboard() {
     { id: "deleted", label: "Deleted / restore", count: deletedCount },
     { id: "reassign", label: "Reassignment requests", badge: pendingRequestCount },
     { id: "profile", label: "Profile requests", badge: pendingProfileCount },
+    { id: "risk", label: "Risk overview" },
+    { id: "activity", label: "Activity log" },
   ];
 
   const summaryParts = [];
@@ -605,6 +632,95 @@ export default function AdminDashboard() {
                     </button>
                   </div>
                 </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      )}
+      </>
+          )}
+
+          {activeSection === "risk" && (
+      <>
+      <h3>Cross-disease risk overview</h3>
+      <p className="hint">
+        Pick a patient to see their most recent result across all 4 diseases in one place.
+      </p>
+      <label style={{ display: "block", maxWidth: 320, marginBottom: "1rem" }}>
+        Patient
+        <select value={riskPatientId} onChange={(e) => handleLoadRiskSummary(e.target.value)}>
+          <option value="">Select a patient</option>
+          {patients.map((p) => (
+            <option key={p.patient_id} value={p.patient_id}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {loadingRiskSummary && <p>Loading...</p>}
+      {riskSummaryError && <p className="error">{riskSummaryError}</p>}
+
+      {riskSummary && (
+        <>
+          <h4>{riskSummary.patient_name}</h4>
+          <div className="metrics-row">
+            {riskSummary.summary.map((s) => (
+              <div key={s.disease} className="metric-card">
+                <p className="metric-label">{DISEASES[s.disease]?.label || s.disease}</p>
+                {s.risk ? (
+                  <>
+                    <span className={`status-chip ${s.risk === "High Risk" ? "danger" : "success"}`}>
+                      {s.risk}
+                    </span>
+                    <p className="hint" style={{ margin: "0.35rem 0 0" }}>
+                      {new Date(s.date).toLocaleDateString()}
+                    </p>
+                  </>
+                ) : (
+                  <span className="hint">No data yet</span>
+                )}
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+      </>
+          )}
+
+          {activeSection === "activity" && (
+      <>
+      <h3>Activity log</h3>
+      <p className="hint">
+        A permanent record of who did what, across the whole system - newest first,
+        capped at the last 200 actions.
+      </p>
+      {activityLog.length === 0 && (
+        <EmptyState title="Nothing logged yet" hint="Actions you take will start showing up here." />
+      )}
+      {activityLog.length > 0 && (
+        <table>
+          <thead>
+            <tr>
+              <th>Who</th>
+              <th>Action</th>
+              <th>When</th>
+            </tr>
+          </thead>
+          <tbody>
+            {activityLog.map((a) => (
+              <tr key={a.id}>
+                <td>
+                  <div className="person-row">
+                    <Avatar name={a.actor_username} size={26} />
+                    <div className="person-meta">
+                      <span>{a.actor_username}</span>
+                      <span className="person-sub">{a.actor_role}</span>
+                    </div>
+                  </div>
+                </td>
+                <td>{a.description}</td>
+                <td>{new Date(a.created_at).toLocaleString()}</td>
               </tr>
             ))}
           </tbody>

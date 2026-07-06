@@ -22,20 +22,23 @@ export default function PatientDashboard() {
   const [reassignError, setReassignError] = useState("");
   const [requestingReassign, setRequestingReassign] = useState(false);
   const [reassignRequests, setReassignRequests] = useState([]);
+  const [riskSummary, setRiskSummary] = useState([]);
 
   async function load() {
     setLoading(true);
     setError("");
     try {
-      const [res, requestsRes, doctorsRes] = await Promise.all([
+      const [res, requestsRes, doctorsRes, summaryRes] = await Promise.all([
         apiFetch("/dashboard/patient"),
         apiFetch("/reassignment-requests"),
         apiFetch("/my-doctors"),
+        apiFetch("/risk-summary"),
       ]);
       setProfile(res.data.patient_profile);
       setPredictions(res.data.predictions || []);
       setReassignRequests(requestsRes || []);
       setMyDoctors(doctorsRes || []);
+      setRiskSummary(summaryRes || []);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -109,6 +112,28 @@ export default function PatientDashboard() {
           <Link to="/profile/patient">Edit profile</Link>
         </div>
       )}
+
+      <h3>Your risk summary</h3>
+      <p className="hint">Your most recent result for each condition, at a glance.</p>
+      <div className="metrics-row">
+        {riskSummary.map((s) => (
+          <div key={s.disease} className="metric-card">
+            <p className="metric-label">{DISEASES[s.disease]?.label || s.disease}</p>
+            {s.risk ? (
+              <>
+                <span className={`status-chip ${s.risk === "High Risk" ? "danger" : "success"}`}>
+                  {s.risk}
+                </span>
+                <p className="hint" style={{ margin: "0.35rem 0 0" }}>
+                  {new Date(s.date).toLocaleDateString()}
+                </p>
+              </>
+            ) : (
+              <span className="hint">No data yet</span>
+            )}
+          </div>
+        ))}
+      </div>
 
       <h3>Your doctors</h3>
       {myDoctors.length === 0 && (

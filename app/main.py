@@ -10,9 +10,11 @@ from app.auth.security import get_current_user
 from app.database import SessionLocal
 from datetime import datetime
 from app.deps import get_db
-from app.services.prediction_service import save_prediction
+from app.services.prediction_service import save_prediction, get_risk_summary
 from app.core.explainer import explain_prediction
+from app.services.activity_log_service import log_activity
 from sqlalchemy.orm import Session
+from app.models.account import Account
 from app.models.patient_profile import PatientProfile
 from app.models.doctor_profile import DoctorProfile
 from app.models.doctor_patient import DoctorPatient
@@ -185,6 +187,23 @@ def explain_prediction_endpoint(
         "probability": prediction.probability,
         "contributions": contributions,
     }
+
+
+# ------------------ CROSS-DISEASE RISK SUMMARY (PATIENT) ------------------
+# One row per disease, showing the patient's own latest result across
+# all 4 - a combined view instead of checking each disease separately.
+# Patients see this for themselves only; doctors don't get an equivalent
+# of this (they stay scoped to just the one disease they're assigned
+# for - see doctor_dashboard()), admin has its own version below.
+@app.get("/risk-summary")
+def risk_summary(
+    user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    if user["role"] != "patient":
+        raise HTTPException(403, "Only patients can view their own risk summary")
+
+    return get_risk_summary(db, user["id"])
 
 
 # ------------------ PATIENT DASHBOARD ------------------
@@ -476,6 +495,15 @@ def request_reassignment(
     )
 
     db.add(request_row)
+    db.flush()
+
+    doctor_account = db.query(Account).filter(Account.id == data.doctor_id).first()
+    log_activity(
+        db, user, "request_reassignment",
+        f"Requested reassignment away from Dr. {doctor_account.username if doctor_account else data.doctor_id} "
+        f"({data.disease})",
+        target_type="reassignment_request", target_id=request_row.id,
+    )
     db.commit()
 
     return {"message": "Reassignment request submitted"}
@@ -715,6 +743,13 @@ def request_profile_change(
     )
 
     db.add(request_row)
+    db.flush()
+
+    log_activity(
+        db, user, "request_profile_change",
+        f"Requested to change {data.field} to '{data.requested_value}'",
+        target_type="profile_change_request", target_id=request_row.id,
+    )
     db.commit()
 
     return {"message": "Profile change request submitted"}
