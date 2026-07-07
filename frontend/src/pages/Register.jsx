@@ -4,6 +4,7 @@ import { apiFetch } from "../api/client.js";
 
 export default function Register() {
   const [username, setUsername] = useState("");
+  const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState("patient");
   const [error, setError] = useState("");
@@ -19,7 +20,7 @@ export default function Register() {
     try {
       await apiFetch("/auth/register", {
         method: "POST",
-        body: { username, password, role },
+        body: { username, email, password, role },
         auth: false,
       });
       setSuccess("Account created. Redirecting to login...");
@@ -40,6 +41,15 @@ export default function Register() {
           <input
             value={username}
             onChange={(e) => setUsername(e.target.value)}
+            required
+          />
+        </label>
+        <label>
+          Email
+          <input
+            type="email"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
             required
           />
         </label>

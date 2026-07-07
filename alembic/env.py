@@ -28,6 +28,8 @@ from app.models.prediction import Prediction
 from app.models.reassignment_request import ReassignmentRequest
 from app.models.profile_change_request import ProfileChangeRequest
 from app.models.activity_log import ActivityLog
+from app.models.password_reset_token import PasswordResetToken
+from app.models.backup_code import BackupCode
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.

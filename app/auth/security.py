@@ -29,6 +29,17 @@ def create_token(user_id: int):
     return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
 
 
+# Issued instead of a real access token when a password check passes but
+# the account still needs to submit a 2FA code. Deliberately short-lived
+# and tagged with "type": "2fa_pending" so it can't be used anywhere a
+# normal access token would be accepted - see the check in
+# get_current_user() below and its use in /auth/2fa/login-verify.
+def create_pending_2fa_token(user_id: int):
+    expire = datetime.now(timezone.utc) + timedelta(minutes=5)
+    payload = {"sub": str(user_id), "exp": expire, "type": "2fa_pending"}
+    return jwt.encode(payload, SECRET_KEY, algorithm=ALGORITHM)
+
+
 def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(get_db)):
     try:
         payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
@@ -36,6 +47,11 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
 
         if user_id is None:
             raise HTTPException(status_code=401, detail="Invalid token")
+
+        # A 2fa_pending token proves the password was correct, nothing
+        # more - it must never work as a substitute for a real login.
+        if payload.get("type") == "2fa_pending":
+            raise HTTPException(status_code=401, detail="2FA verification required")
 
         user = db.query(Account).filter(Account.id == int(user_id)).first()
 
@@ -46,7 +62,8 @@ def get_current_user(token: str = Depends(oauth2_scheme), db: Session = Depends(
             "id": user.id,
             "role": user.role,
             "username": user.username,
-            "email": user.email
+            "email": user.email,
+            "totp_enabled": user.totp_enabled,
         }
 
     except JWTError:

@@ -1,7 +1,8 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.deps import get_db
@@ -17,6 +18,7 @@ from app.models.activity_log import ActivityLog
 from app.registry.model_registry import MODEL_REGISTRY
 from app.services.activity_log_service import log_activity
 from app.services.prediction_service import get_risk_summary
+from app.services.email_service import send_doctor_assigned_email, send_request_resolved_email
 
 router = APIRouter(prefix="/admin", tags=["Admin"])
 
@@ -135,6 +137,13 @@ def assign_patient(
         target_type="doctor_patient", target_id=relation.id,
     )
     db.commit()
+
+    # Best-effort notification - a bad/unset SMTP config shouldn't turn a
+    # successful assignment into a failed request.
+    try:
+        send_doctor_assigned_email(patient.email, patient.username, doctor.username, data.disease)
+    except Exception as e:
+        print(f"Failed to send doctor-assigned email: {e}")
 
     return {"message": "Patient assigned successfully"}
 
@@ -452,6 +461,16 @@ def resolve_reassignment_request(
     )
     db.commit()
 
+    if patient:
+        try:
+            send_request_resolved_email(
+                patient.email, patient.username,
+                f"reassignment away from Dr. {doctor.username if doctor else req.doctor_id} for {req.disease}",
+                data.status, data.note,
+            )
+        except Exception as e:
+            print(f"Failed to send request-resolved email: {e}")
+
     return {"message": f"Request {data.status}"}
 
 
@@ -540,6 +559,16 @@ def resolve_profile_change_request(
     )
     db.commit()
 
+    if account:
+        try:
+            send_request_resolved_email(
+                account.email, account.username,
+                f"request to change {req.field} to '{req.requested_value}'",
+                data.status, data.note,
+            )
+        except Exception as e:
+            print(f"Failed to send request-resolved email: {e}")
+
     return {"message": f"Request {data.status}"}
 
 
@@ -608,3 +637,56 @@ def list_activity_log(
         }
         for r in rows
     ]
+
+
+# ------------------ ANALYTICS ------------------
+# Aggregate counts only - no per-row data leaves this endpoint, so it
+# doesn't need any of the row-level access checks the rest of this file
+# has. All three aggregates deliberately exclude soft-deleted predictions,
+# same as every other admin view of predictions.
+@router.get("/analytics")
+def get_analytics(admin: dict = Depends(get_current_admin), db: Session = Depends(get_db)):
+    disease_rows = (
+        db.query(Prediction.disease, func.count(Prediction.id))
+        .filter(Prediction.deleted_at.is_(None))
+        .group_by(Prediction.disease)
+        .all()
+    )
+    predictions_per_disease = [{"disease": d, "count": c} for d, c in disease_rows]
+
+    risk_rows = (
+        db.query(Prediction.disease, Prediction.risk_level, func.count(Prediction.id))
+        .filter(Prediction.deleted_at.is_(None))
+        .group_by(Prediction.disease, Prediction.risk_level)
+        .all()
+    )
+    risk_map = {}
+    for disease, risk_level, count in risk_rows:
+        row = risk_map.setdefault(disease, {"disease": disease, "high_risk": 0, "low_risk": 0})
+        if risk_level == "High Risk":
+            row["high_risk"] = count
+        else:
+            row["low_risk"] = count
+    risk_distribution = list(risk_map.values())
+
+    # Last 30 days of signups, split by role - recent enough to show a
+    # trend, short enough that the chart doesn't need pagination/zooming.
+    thirty_days_ago = datetime.utcnow() - timedelta(days=30)
+    signup_rows = (
+        db.query(func.date(Account.created_at), Account.role, func.count(Account.id))
+        .filter(Account.created_at >= thirty_days_ago)
+        .group_by(func.date(Account.created_at), Account.role)
+        .all()
+    )
+    signup_map = {}
+    for date_val, role, count in signup_rows:
+        key = str(date_val)
+        row = signup_map.setdefault(key, {"date": key, "patient": 0, "doctor": 0, "admin": 0})
+        row[role] = count
+    signups_over_time = sorted(signup_map.values(), key=lambda r: r["date"])
+
+    return {
+        "predictions_per_disease": predictions_per_disease,
+        "risk_distribution": risk_distribution,
+        "signups_over_time": signups_over_time,
+    }

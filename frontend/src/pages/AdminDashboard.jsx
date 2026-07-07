@@ -1,4 +1,8 @@
 import { useEffect, useState } from "react";
+import {
+  BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid,
+  Tooltip, Legend, ResponsiveContainer,
+} from "recharts";
 import { apiFetch } from "../api/client.js";
 import { DISEASES } from "../config/diseaseFields.js";
 import { useAuth } from "../auth/AuthContext.jsx";
@@ -36,6 +40,8 @@ export default function AdminDashboard() {
   const [loadingRiskSummary, setLoadingRiskSummary] = useState(false);
   const [riskSummaryError, setRiskSummaryError] = useState("");
 
+  const [analytics, setAnalytics] = useState(null);
+
   const [activeSection, setActiveSection] = useState("overview");
 
   async function loadAll() {
@@ -51,6 +57,7 @@ export default function AdminDashboard() {
         requestsRes,
         profileRequestsRes,
         activityLogRes,
+        analyticsRes,
       ] = await Promise.all([
         apiFetch("/admin/doctors"),
         apiFetch("/admin/patients"),
@@ -60,6 +67,7 @@ export default function AdminDashboard() {
         apiFetch("/admin/reassignment-requests"),
         apiFetch("/admin/profile-change-requests"),
         apiFetch("/admin/activity-log"),
+        apiFetch("/admin/analytics"),
       ]);
       setDoctors(doctorsRes);
       setPatients(patientsRes);
@@ -69,6 +77,7 @@ export default function AdminDashboard() {
       setRequests(requestsRes);
       setProfileRequests(profileRequestsRes);
       setActivityLog(activityLogRes);
+      setAnalytics(analyticsRes);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -216,6 +225,7 @@ export default function AdminDashboard() {
     { id: "reassign", label: "Reassignment requests", badge: pendingRequestCount },
     { id: "profile", label: "Profile requests", badge: pendingProfileCount },
     { id: "risk", label: "Risk overview" },
+    { id: "analytics", label: "Analytics" },
     { id: "activity", label: "Activity log" },
   ];
 
@@ -683,6 +693,88 @@ export default function AdminDashboard() {
               </div>
             ))}
           </div>
+        </>
+      )}
+      </>
+          )}
+
+          {activeSection === "analytics" && (
+      <>
+      <h3>Analytics</h3>
+      <p className="hint">
+        A system-wide view - not scoped to any one patient or doctor.
+      </p>
+
+      {!analytics && <p>Loading...</p>}
+
+      {analytics && (
+        <>
+          <h4>Predictions run per disease</h4>
+          {analytics.predictions_per_disease.length === 0 ? (
+            <EmptyState title="No predictions yet" hint="Charts will fill in once patients start running predictions." />
+          ) : (
+            <div style={{ width: "100%", height: 260 }}>
+              <ResponsiveContainer>
+                <BarChart
+                  data={analytics.predictions_per_disease.map((d) => ({
+                    label: DISEASES[d.disease]?.label || d.disease,
+                    count: d.count,
+                  }))}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="label" />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip />
+                  <Bar dataKey="count" name="Predictions" fill="#4a90d9" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          <h4 style={{ marginTop: "2rem" }}>Risk level distribution per disease</h4>
+          {analytics.risk_distribution.length === 0 ? (
+            <EmptyState title="No predictions yet" hint="Charts will fill in once patients start running predictions." />
+          ) : (
+            <div style={{ width: "100%", height: 260 }}>
+              <ResponsiveContainer>
+                <BarChart
+                  data={analytics.risk_distribution.map((d) => ({
+                    label: DISEASES[d.disease]?.label || d.disease,
+                    "High Risk": d.high_risk,
+                    "Low Risk": d.low_risk,
+                  }))}
+                >
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="label" />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip />
+                  <Legend />
+                  <Bar dataKey="High Risk" fill="#c0392b" />
+                  <Bar dataKey="Low Risk" fill="#27ae60" />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          )}
+
+          <h4 style={{ marginTop: "2rem" }}>New signups (last 30 days)</h4>
+          {analytics.signups_over_time.length === 0 ? (
+            <EmptyState title="No new signups yet" hint="This fills in as new patients and doctors register." />
+          ) : (
+            <div style={{ width: "100%", height: 260 }}>
+              <ResponsiveContainer>
+                <LineChart data={analytics.signups_over_time}>
+                  <CartesianGrid strokeDasharray="3 3" />
+                  <XAxis dataKey="date" />
+                  <YAxis allowDecimals={false} />
+                  <Tooltip />
+                  <Legend />
+                  <Line type="monotone" dataKey="patient" name="Patients" stroke="#4a90d9" />
+                  <Line type="monotone" dataKey="doctor" name="Doctors" stroke="#8e44ad" />
+                  <Line type="monotone" dataKey="admin" name="Admins" stroke="#95a5a6" />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+          )}
         </>
       )}
       </>

@@ -60,3 +60,40 @@ export async function apiFetch(path, { method = "GET", body, auth = true, isForm
 
   return data;
 }
+
+// For binary responses (PDF downloads) - apiFetch above always calls
+// res.json(), which would break on a real file. Fetches the file with
+// the same auth header, then triggers a normal browser "Save As" via a
+// throwaway <a> tag instead of navigating there directly (navigating
+// would just show the PDF in-tab with no filename control, and would
+// drop the Authorization header entirely on a plain link click).
+export async function downloadFile(path, filename) {
+  const headers = {};
+  const token = getToken();
+  if (token) {
+    headers["Authorization"] = `Bearer ${token}`;
+  }
+
+  const res = await fetch(`${API_BASE_URL}${path}`, { headers });
+
+  if (!res.ok) {
+    let message = `Request failed with status ${res.status}`;
+    try {
+      const data = await res.json();
+      message = data.detail?.error || data.detail || data.message || message;
+    } catch {
+      // response wasn't JSON (e.g. a real error page) - keep the default message
+    }
+    throw new Error(typeof message === "string" ? message : JSON.stringify(message));
+  }
+
+  const blob = await res.blob();
+  const url = window.URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  window.URL.revokeObjectURL(url);
+}

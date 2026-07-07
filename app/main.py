@@ -1,5 +1,7 @@
 from fastapi import FastAPI, HTTPException, Depends
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import StreamingResponse
+import io
 from pydantic import BaseModel
 import sys
 from pathlib import Path
@@ -11,7 +13,9 @@ from app.database import SessionLocal
 from datetime import datetime
 from app.deps import get_db
 from app.services.prediction_service import save_prediction, get_risk_summary
+from app.services.email_service import send_high_risk_alert_email
 from app.core.explainer import explain_prediction
+from app.services.report_service import build_prediction_report_pdf
 from app.services.activity_log_service import log_activity
 from sqlalchemy.orm import Session
 from app.models.account import Account
@@ -114,6 +118,15 @@ def predict_api(
         input_data=request.data,
     )
 
+    # Best-effort alert - only for patients running predictions on
+    # themselves, not doctors testing the tool. A failed email shouldn't
+    # turn an already-saved prediction into a failed request.
+    if risk == "High Risk" and user["role"] == "patient":
+        try:
+            send_high_risk_alert_email(user["email"], user["username"], request.disease, confidence)
+        except Exception as e:
+            print(f"Failed to send high-risk alert email: {e}")
+
     return {
         "status": "success",
         "data": result["prediction"]
@@ -187,6 +200,68 @@ def explain_prediction_endpoint(
         "probability": prediction.probability,
         "contributions": contributions,
     }
+
+
+# ------------------ DOWNLOADABLE PDF REPORT ------------------
+# Same access rule as /explain above (owner, assigned doctor for that
+# disease, or admin) - deliberately duplicated rather than shared,
+# since the two checks are short and keeping them independent means a
+# future change to one can't accidentally loosen the other by mistake.
+@app.get("/predictions/{prediction_id}/report")
+def prediction_report(
+    prediction_id: int,
+    user: dict = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    prediction = db.query(Prediction).filter(Prediction.id == prediction_id).first()
+    if not prediction:
+        raise HTTPException(404, "Prediction not found")
+
+    is_owner = prediction.account_id == user["id"]
+    is_admin = user["role"] == "admin"
+
+    has_doctor_access = False
+    if user["role"] == "doctor" and not is_owner:
+        has_doctor_access = db.query(DoctorPatient).filter(
+            DoctorPatient.doctor_id == user["id"],
+            DoctorPatient.patient_id == prediction.account_id,
+            DoctorPatient.disease == prediction.disease,
+            DoctorPatient.deleted_at.is_(None)
+        ).first() is not None
+
+    if not (is_owner or is_admin or has_doctor_access):
+        raise HTTPException(403, "You don't have access to this prediction")
+
+    if prediction.deleted_at is not None and not is_admin:
+        raise HTTPException(404, "Prediction not found")
+
+    # Explanation is optional here (unlike /explain) - a report for an
+    # older prediction made before input_data was added should still
+    # download, just without the "what influenced this" section.
+    contributions = None
+    if prediction.input_data:
+        try:
+            contributions = explain_prediction(prediction.disease, prediction.input_data)
+        except ValueError:
+            contributions = None
+
+    profile = db.query(PatientProfile).filter(
+        PatientProfile.patient_id == prediction.account_id
+    ).first()
+    if profile:
+        patient_name = profile.name
+    else:
+        account = db.query(Account).filter(Account.id == prediction.account_id).first()
+        patient_name = account.username if account else "Unknown"
+
+    pdf_bytes = build_prediction_report_pdf(prediction, patient_name, contributions)
+
+    filename = f"{prediction.disease}_report_{prediction.id}.pdf"
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ------------------ CROSS-DISEASE RISK SUMMARY (PATIENT) ------------------

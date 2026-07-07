@@ -4,6 +4,8 @@ import ProtectedRoute from "./auth/ProtectedRoute.jsx";
 import Home from "./pages/Home.jsx";
 import Login from "./pages/Login.jsx";
 import Register from "./pages/Register.jsx";
+import ForgotPassword from "./pages/ForgotPassword.jsx";
+import ResetPassword from "./pages/ResetPassword.jsx";
 import PatientDashboard from "./pages/PatientDashboard.jsx";
 import PatientProfileForm from "./pages/PatientProfileForm.jsx";
 import Predict from "./pages/Predict.jsx";
@@ -35,7 +37,7 @@ function NavBar() {
         {user && user.role === "patient" && <Link to="/patient">Dashboard</Link>}
         {user && user.role === "doctor" && <Link to="/doctor">Dashboard</Link>}
         {user && user.role === "admin" && <Link to="/admin">Dashboard</Link>}
-        {user && <Link to="/change-password">Change Password</Link>}
+        {user && <Link to="/change-password">Account Settings</Link>}
         {user && (
           <button type="button" className="link-button" onClick={handleLogout}>
             Logout ({user.username})
@@ -57,6 +59,8 @@ export default function App() {
             <Route path="/" element={<Home />} />
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
+            <Route path="/forgot-password" element={<ForgotPassword />} />
+            <Route path="/reset-password" element={<ResetPassword />} />
             <Route
               path="/patient"
               element={

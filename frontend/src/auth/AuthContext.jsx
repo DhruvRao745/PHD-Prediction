@@ -39,6 +39,26 @@ export function AuthProvider({ children }) {
       isForm: true,
       auth: false,
     });
+
+    // 2FA-enabled accounts (admin only) don't get a real token yet - just
+    // a short-lived pending_token the caller has to redeem via
+    // completeTwoFactorLogin() once the user enters their code.
+    if (data.requires_2fa) {
+      return { requires2fa: true, pendingToken: data.pending_token };
+    }
+
+    setToken(data.access_token);
+    const me = await apiFetch("/auth/me");
+    setUser(me);
+    return me;
+  }
+
+  async function completeTwoFactorLogin(pendingToken, code) {
+    const data = await apiFetch("/auth/2fa/login-verify", {
+      method: "POST",
+      body: { pending_token: pendingToken, code },
+      auth: false,
+    });
     setToken(data.access_token);
     const me = await apiFetch("/auth/me");
     setUser(me);
@@ -50,8 +70,19 @@ export function AuthProvider({ children }) {
     setUser(null);
   }
 
+  // Re-fetches /auth/me and updates the shared user object - needed
+  // after enabling/disabling 2FA, since that flips user.totp_enabled
+  // without a fresh login happening.
+  async function refreshUser() {
+    const me = await apiFetch("/auth/me");
+    setUser(me);
+    return me;
+  }
+
   return (
-    <AuthContext.Provider value={{ user, loading, login, logout }}>
+    <AuthContext.Provider
+      value={{ user, loading, login, completeTwoFactorLogin, logout, refreshUser }}
+    >
       {children}
     </AuthContext.Provider>
   );

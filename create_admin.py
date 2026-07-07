@@ -27,6 +27,18 @@ def main():
         print(f"Username '{username}' already exists (role: {existing.role}).")
         return
 
+    # Real email now required (not the old f"{username}@admin.local"
+    # placeholder) - forgot-password has nowhere to send a link without one.
+    email = input("Admin email (real inbox - used for password reset): ").strip()
+    if not email:
+        print("Email cannot be empty.")
+        return
+
+    existing_email = db.query(Account).filter(Account.email == email).first()
+    if existing_email:
+        print(f"An account with email '{email}' already exists.")
+        return
+
     # Plain input(), not getpass - this is a one-off script you run
     # yourself locally, and getpass hides typing completely (no
     # asterisks either), which is easy to mistake for being broken.
@@ -41,7 +53,7 @@ def main():
 
     admin = Account(
         username=username,
-        email=f"{username}@admin.local",
+        email=email,
         password_hash=hash_password(password),
         role="admin",
     )

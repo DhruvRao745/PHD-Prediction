@@ -1,16 +1,22 @@
 import { useState } from "react";
-import { apiFetch } from "../api/client.js";
+import { apiFetch, downloadFile } from "../api/client.js";
 
 // Small "Why?" toggle that fetches a SHAP feature-contribution breakdown
 // for one specific prediction and shows it as simple bars - red pushed
 // the result toward higher risk, green pushed it toward lower risk.
 // Used on both the doctor's patient view and the patient's own
 // dashboard/history, since the backend allows either to see it.
+//
+// Also carries the "Download PDF" button for the same prediction - not
+// its own component, since it always shows up in exactly the same
+// places as this one and shares the same predictionId prop.
 export default function PredictionExplain({ predictionId, explainable = true }) {
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
   const [error, setError] = useState("");
+  const [downloading, setDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState("");
 
   async function toggle() {
     if (open) {
@@ -31,8 +37,35 @@ export default function PredictionExplain({ predictionId, explainable = true }) 
     }
   }
 
+  async function handleDownload() {
+    setDownloading(true);
+    setDownloadError("");
+    try {
+      await downloadFile(
+        `/predictions/${predictionId}/report`,
+        `prediction-${predictionId}-report.pdf`
+      );
+    } catch (err) {
+      setDownloadError(err.message);
+    } finally {
+      setDownloading(false);
+    }
+  }
+
+  const downloadButton = (
+    <button type="button" className="link-button" onClick={handleDownload} disabled={downloading}>
+      {downloading ? "Preparing PDF..." : "Download PDF"}
+    </button>
+  );
+
   if (!explainable) {
-    return <span className="hint">Not explainable (made before this feature)</span>;
+    return (
+      <span>
+        <span className="hint">Not explainable (made before this feature)</span>{" "}
+        {downloadButton}
+        {downloadError && <p className="error">{downloadError}</p>}
+      </span>
+    );
   }
 
   const maxAbs = data
@@ -43,7 +76,9 @@ export default function PredictionExplain({ predictionId, explainable = true }) 
     <div>
       <button type="button" className="link-button" onClick={toggle}>
         {open ? "Hide reasoning" : "Why?"}
-      </button>
+      </button>{" "}
+      {downloadButton}
+      {downloadError && <p className="error">{downloadError}</p>}
       {open && (
         <div className="card" style={{ marginTop: "0.5rem" }}>
           {loading && <p>Loading explanation...</p>}
